@@ -21,14 +21,14 @@ export async function stampItems(bytes, items) {
  * createEditor(container, { onSelect(item|null), onEdit(item) })
  * item: { page, u, v, w, h (fractions of visual page), bytes, type:'png'|'jpg', src (url for display), keepAspect, ... }
  */
-export function createEditor(container, { onSelect, onEdit, onChange } = {}) {
+export function createEditor(container, { onSelect, onEdit, onChange, onDrawRect } = {}) {
   const docEl = h('div', { class: 'doc' });
   container.append(docEl);
   let pages = []; // {wrap, overlay, vw, vh}
   let items = [];
   let selected = null;
   let current = 0;
-  let io = null, loadGen = 0;
+  let io = null, loadGen = 0, drawMode = !!onDrawRect;
   const dirty = () => { unsaved.value = items.length > 0; onChange && onChange(); };
   // Release observers/renders when the user leaves the tool.
   onLeave(() => ed.destroy());
@@ -68,6 +68,10 @@ export function createEditor(container, { onSelect, onEdit, onChange } = {}) {
         const p = { wrap, overlay, aspect, pts };
         pages.push(p);
         wrap.addEventListener('pointerdown', (e) => { setCurrent(i); if (e.target === overlay) select(null); });
+        if (onDrawRect) {
+          overlay.style.touchAction = drawMode ? 'none' : '';
+          overlay.addEventListener('pointerdown', (e) => { if (drawMode && e.target === overlay) drawRect(e, i); });
+        }
         docEl.append(wrap);
       }
       if (pdf.numPages > n) docEl.append(h('div', { class: 'sub' }, `แสดง ${n} หน้าแรกจาก ${pdf.numPages} หน้า`));
@@ -79,18 +83,28 @@ export function createEditor(container, { onSelect, onEdit, onChange } = {}) {
       }, { threshold: [0.3, 0.6] });
       pages.forEach(p => io.observe(p.wrap));
     },
-    /** Add an item sized by desired width in fraction of page width (height from aspect). */
-    add(it, { page = current, widthFrac = 0.3, pxAspect } = {}) {
+    /** Visual page aspect (width / height) of page i. */
+    pageAspect: (i) => (pages[i] ? pages[i].aspect : 1),
+    /** Drawing rectangles by dragging on empty page area (only when onDrawRect is given). */
+    setDrawMode(on) { drawMode = !!on; pages.forEach(p => { p.overlay.style.touchAction = drawMode ? 'none' : ''; p.overlay.classList.toggle('drawing', drawMode); }); },
+    /**
+     * Add an item sized by desired width in fraction of page width (height from aspect),
+     * or at an explicit rect {u,v,w,h} (fractions of the page).
+     */
+    add(it, { page = current, widthFrac = 0.3, pxAspect, rect, quiet = false } = {}) {
       const P = pages[page];
-      const aspect = pxAspect || it.aspect || 1; // width / height of the item image
-      let w = widthFrac, hh = (w / aspect) * P.aspect;
-      if (hh > 0.8) { hh = 0.8; w = hh * aspect / P.aspect; }
-      Object.assign(it, { page, w, h: hh, u: it.u ?? (1 - w) / 2, v: it.v ?? (1 - hh) / 2, keepAspect: it.keepAspect ?? true });
+      if (!P) return null;
+      if (rect) Object.assign(it, { page, ...rect, keepAspect: it.keepAspect ?? false });
+      else {
+        const aspect = pxAspect || it.aspect || 1; // width / height of the item image
+        let w = widthFrac, hh = (w / aspect) * P.aspect;
+        if (hh > 0.8) { hh = 0.8; w = hh * aspect / P.aspect; }
+        Object.assign(it, { page, w, h: hh, u: it.u ?? (1 - w) / 2, v: it.v ?? (1 - hh) / 2, keepAspect: it.keepAspect ?? true });
+      }
       items.push(it);
       mount(it);
-      select(it);
+      if (!quiet) { select(it); pages[page].wrap.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
       dirty();
-      pages[page].wrap.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       return it;
     },
     /** Replace an item's image (e.g. after editing text), keeping its top-left & height scale. */
@@ -108,6 +122,29 @@ export function createEditor(container, { onSelect, onEdit, onChange } = {}) {
     select,
   };
 
+  /** Rubber-band a new rectangle on page i. */
+  function drawRect(e, i) {
+    e.preventDefault();
+    select(null);
+    const P = pages[i], R = P.overlay.getBoundingClientRect();
+    const cl = (v) => Math.min(1, Math.max(0, v));
+    const u0 = cl((e.clientX - R.left) / R.width), v0 = cl((e.clientY - R.top) / R.height);
+    const ghost = h('div', { class: 'draw-ghost' });
+    P.overlay.append(ghost);
+    let r = { u: u0, v: v0, w: 0, h: 0 };
+    const mv = (ev) => {
+      const u1 = cl((ev.clientX - R.left) / R.width), v1 = cl((ev.clientY - R.top) / R.height);
+      r = { u: Math.min(u0, u1), v: Math.min(v0, v1), w: Math.abs(u1 - u0), h: Math.abs(v1 - v0) };
+      Object.assign(ghost.style, { left: r.u * 100 + '%', top: r.v * 100 + '%', width: r.w * 100 + '%', height: r.h * 100 + '%' });
+    };
+    const up = () => {
+      removeEventListener('pointermove', mv); removeEventListener('pointerup', up); removeEventListener('pointercancel', up);
+      ghost.remove();
+      if (r.w > 0.008 && r.h > 0.004) onDrawRect(i, r);
+    };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up); addEventListener('pointercancel', up);
+  }
+
   function setCurrent(i) {
     if (i < 0) return;
     current = i;
@@ -124,7 +161,7 @@ export function createEditor(container, { onSelect, onEdit, onChange } = {}) {
   function mount(it) {
     const rs = h('div', { class: 'rs' });
     const del = h('button', { class: 'del', title: 'ลบรายการนี้', type: 'button' }, '×');
-    it.el = h('div', { class: 'item', tabindex: 0, role: 'group',
+    it.el = h('div', { class: 'item' + (it.cls ? ' ' + it.cls : ''), tabindex: 0, role: 'group',
       'aria-label': 'รายการที่วางบนหน้า — ลูกศรเพื่อเลื่อน, Shift+ลูกศรเพื่อปรับขนาด, Delete เพื่อลบ' },
       h('img', { src: it.src, draggable: 'false', alt: '' }), rs, del);
     it.el.onfocus = () => { if (selected !== it) select(it); };

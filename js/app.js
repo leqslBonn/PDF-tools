@@ -58,6 +58,39 @@ function privacyBox() {
   );
 }
 
+/* ---------- install as app (PWA) ---------- */
+let installPrompt = null;
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  document.querySelectorAll('.install-btn').forEach(b => { b.hidden = false; });
+});
+window.addEventListener('appinstalled', () => document.querySelectorAll('.install-btn').forEach(b => b.remove()));
+
+function iosInstallHelp() {
+  const bg = h('div', { class: 'modal-bg', onclick: (e) => { if (e.target === bg) bg.remove(); } });
+  bg.append(h('div', { class: 'modal', style: 'width:min(420px,100%)' },
+    h('h3', {}, '📲 ติดตั้งเป็นแอปบน iPhone / iPad'),
+    h('ol', { style: 'margin:0 0 8px;padding-left:22px;line-height:1.9' },
+      h('li', {}, 'เปิดหน้านี้ด้วย Safari'),
+      h('li', {}, 'แตะปุ่ม แชร์ ', h('b', {}, '(สี่เหลี่ยมมีลูกศรชี้ขึ้น ⬆︎)')),
+      h('li', {}, 'เลือก ', h('b', {}, '"เพิ่มไปยังหน้าจอโฮม"'), ' แล้วแตะ "เพิ่ม"')),
+    h('p', { style: 'margin:0;color:var(--muted);font-size:14px' }, 'จากนั้นเปิดจากไอคอนบนหน้าจอได้เลย ใช้งานได้แม้ไม่มีอินเทอร์เน็ต'),
+    h('div', { class: 'actions' }, h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: () => bg.remove() }, 'เข้าใจแล้ว'))));
+  document.body.append(bg);
+}
+function installButton() {
+  if (isStandalone()) return null;
+  const b = h('button', { class: 'pill install-btn', type: 'button', hidden: !(installPrompt || isIOS),
+    onclick: async () => {
+      if (installPrompt) { installPrompt.prompt(); await installPrompt.userChoice; installPrompt = null; b.hidden = true; }
+      else iosInstallHelp();
+    } }, '📲 ติดตั้งเป็นแอป');
+  return b;
+}
+
 function renderHome() {
   document.title = 'PDF Toolkit';
   app.style.removeProperty('--c');
@@ -73,6 +106,7 @@ function renderHome() {
           h('span', { class: 'pill' }, h('span', { class: 'dot' }), `เครื่องมือ ${TOOLS.length} รายการ`),
           h('button', { class: 'pill', type: 'button', onclick: () => privacy.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, '🔒 ไฟล์ไม่ออกจากเครื่องคุณ'),
           h('span', { class: 'pill' }, '📱 ใช้ได้ทั้งมือถือและคอม'),
+          installButton(),
         ),
       ),
       h('div', { class: 'hero-art-wrap', html: HERO_ART }),
@@ -134,6 +168,31 @@ window.addEventListener('beforeunload', (e) => { if (unsaved.value) { e.preventD
 window.addEventListener('dragover', (e) => e.preventDefault());
 window.addEventListener('drop', (e) => e.preventDefault());
 route();
+
+/* ---------- offline support: service worker ----------
+ * Skipped on localhost so development always sees fresh files (add ?sw to test it locally). */
+const devHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && !/[?&]sw\b/.test(location.search);
+if ('serviceWorker' in navigator && location.protocol !== 'file:' && !devHost) {
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloading) { reloading = true; location.reload(); } });
+  const offerUpdate = (worker) => {
+    if (document.querySelector('.update-toast')) return;
+    const bar = h('div', { class: 'toast update-toast', role: 'status' }, '✨ มีเวอร์ชันใหม่ ',
+      h('button', { class: 'btn sm primary', style: 'margin-left:8px', onclick: () => {
+        if (unsaved.value && !confirm('มีงานที่ยังไม่ได้บันทึก โหลดเวอร์ชันใหม่ตอนนี้เลยหรือไม่?')) return;
+        worker.postMessage('skipWaiting'); bar.remove();
+      } }, 'อัปเดต'),
+      h('button', { class: 'btn sm', style: 'margin-left:6px', onclick: () => bar.remove() }, 'ภายหลัง'));
+    document.body.append(bar);
+  };
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller) offerUpdate(w); });
+    });
+  }).catch((e) => console.warn('service worker not registered', e));
+}
 
 // Warm the font cache (self-hosted) so signature/stamp fonts also work offline later.
 (window.requestIdleCallback || setTimeout)(() => {

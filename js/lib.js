@@ -415,7 +415,16 @@ export function pageGeom(page) {
       default: return { x: x0 + u, y: y1 - v };
     }
   };
-  return { rot, vw, vh, v2p, box };
+  // inverse of v2p: PDF user space → visual
+  const p2v = (x, y) => {
+    switch (rot) {
+      case 90: return { u: y - y0, v: x - x0 };
+      case 180: return { u: x1 - x, v: y - y0 };
+      case 270: return { u: y1 - y, v: x1 - x };
+      default: return { u: x - x0, v: y1 - y };
+    }
+  };
+  return { rot, vw, vh, v2p, p2v, box };
 }
 
 /**

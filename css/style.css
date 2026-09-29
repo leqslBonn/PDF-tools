@@ -799,3 +799,26 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 @keyframes btn-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .btn.busy::after { animation-duration: 2s; } }
 .fitem.bad { border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); }
+
+/* redact: rubber-band rectangle + drawing cursor */
+.overlay.drawing { cursor: crosshair; }
+.draw-ghost { position: absolute; border: 2px dashed var(--accent); background: rgba(0,0,0,.35); pointer-events: none; }
+.item.redact { background: #000; }
+.item.redact img { opacity: 0; }
+.item.redact.white { background: #fff; outline: 1px dashed #999; }
+
+/* fill form fields */
+.fill-list { display: flex; flex-direction: column; gap: 10px; max-height: 52vh; overflow: auto; padding-right: 4px; }
+.fill-row { display: flex; flex-direction: column; gap: 4px; }
+.fill-label { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 500; word-break: break-all; }
+.fill-no { flex: none; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 12px; display: grid; place-items: center; }
+.fill-box {
+  position: absolute; padding: 0; margin: 0; border: 1.5px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 3px; cursor: pointer;
+}
+.fill-box span {
+  position: absolute; left: -2px; top: -2px; transform: translate(-50%, -50%); min-width: 16px; height: 16px; padding: 0 3px;
+  border-radius: 999px; background: var(--accent); color: #fff; font-size: 10px; line-height: 16px; text-align: center;
+}
+.fill-box.filled { background: color-mix(in srgb, #22c55e 16%, transparent); border-color: #22c55e; }
+.fill-box.on { outline: 3px solid var(--accent); outline-offset: 1px; }

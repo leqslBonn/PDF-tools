@@ -1,0 +1,21 @@
+{
+  "name": "PDF Toolkit — เครื่องมือ PDF",
+  "short_name": "PDF Toolkit",
+  "description": "สแกน รวม แยก บีบ แปลง ใส่รหัส เซ็น และรับรองสำเนา PDF — ทำในเครื่องคุณ ไฟล์ไม่ถูกอัปโหลด",
+  "lang": "th",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f4fe",
+  "theme_color": "#7c3aed",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "สแกนเอกสาร", "url": "./#/scan", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "เซ็นเอกสาร", "url": "./#/sign", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] },
+    { "name": "สำเนาบัตร", "url": "./#/id-copy", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
