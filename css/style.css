@@ -830,3 +830,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 .tline.edited:not(.sel) { outline: 1.5px dashed #22c55e; }
 .tedit-cover, .tedit-text { position: absolute; pointer-events: none; }
 .tedit-text { z-index: 1; }
+
+/* edit text: which PDFs work */
+.kind-guide { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); margin-bottom: 14px; }
+.kind { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: 12px; font-size: 13.5px; border: 1px solid var(--line); background: var(--card); }
+.kind span { color: var(--muted); }
+.kind.ok { border-color: color-mix(in srgb, #22c55e 45%, var(--line)); }
+.kind.no { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); }
+.scan-badge {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%); padding: 6px 12px; border-radius: 999px;
+  background: rgba(15, 23, 42, .82); color: #fff; font-size: 13px; white-space: nowrap; pointer-events: none;
+}

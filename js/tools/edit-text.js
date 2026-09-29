@@ -220,8 +220,38 @@ export default function (root) {
     h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: busy(run) }, 'บันทึก PDF')),
     st, res);
   const panel = h('div', { class: 'hidden' }, h('div', { class: 'editor-layout' }, docEl, side));
-  const dz = dropzone({ accept: '.pdf', hint: 'ใช้ได้กับ PDF ที่มีตัวอักษรจริง (ไม่ใช่ไฟล์สแกน) — เนียนที่สุดกับเอกสารพื้นขาวที่ใช้ TH Sarabun', onFiles: load });
-  root.append(dz, panel);
+  const dz = dropzone({ accept: '.pdf', title: 'ลากไฟล์ PDF ที่ไม่ใช่ไฟล์สแกนมาวาง หรือคลิกเพื่อเลือก', hint: 'เนียนที่สุดกับเอกสารพื้นขาวที่ใช้ฟอนต์ TH Sarabun', onFiles: load });
+  // Up-front guidance: this tool only works on "real text" PDFs.
+  const guide = h('div', { class: 'kind-guide' },
+    h('div', { class: 'kind ok' }, h('b', {}, '✅ ใช้ได้'), h('span', {}, 'PDF ที่สร้างจากคอม เช่น Save/Export จาก Word, Excel, Google Docs, ใบเสร็จ/ใบแจ้งหนี้จากระบบ, หนังสือราชการที่พิมพ์ด้วย TH Sarabun')),
+    h('div', { class: 'kind no' }, h('b', {}, '❌ ใช้ไม่ได้'), h('span', {}, 'ไฟล์สแกน หรือรูปถ่ายเอกสารที่แปลงเป็น PDF — ในไฟล์มีแต่ภาพ ไม่มีตัวอักษรให้แก้')),
+    h('div', { class: 'kind tip' }, h('b', {}, '💡 วิธีดูง่ายๆ'), h('span', {}, 'เปิดไฟล์แล้วลองลากคลุมข้อความ ถ้าคลุม/คัดลอกได้ = ใช้ได้ ถ้าคลุมไม่ได้ = ไฟล์สแกน')));
+  const scanBox = h('div', { class: 'panel hidden', role: 'alert' });
+  root.append(guide, dz, scanBox, panel);
+
+  /** A document is "scanned" when its first pages carry (almost) no extractable text. */
+  async function textInfo(doc) {
+    const n = Math.min(doc.numPages, 5);
+    let chars = 0;
+    for (let i = 1; i <= n; i++) {
+      const tc = await (await doc.getPage(i)).getTextContent();
+      chars += tc.items.reduce((c, it) => c + (it.str || '').replace(/\s/g, '').length, 0);
+    }
+    return { chars, checked: n };
+  }
+  function showScanned(name) {
+    scanBox.innerHTML = '';
+    scanBox.append(
+      h('h3', { style: 'margin-top:0' }, '📷 ไฟล์นี้เป็นไฟล์สแกน / รูปภาพ'),
+      h('p', { style: 'margin:0 0 10px' }, `"${name}" ไม่มีตัวอักษรจริงอยู่ในไฟล์ (มีแต่ภาพของตัวหนังสือ) จึงแก้ข้อความเดิมตรงๆ ไม่ได้`),
+      h('p', { style: 'margin:0 0 12px;color:var(--muted);font-size:14px' }, 'ทางเลือกที่ทำได้กับไฟล์สแกน:'),
+      h('div', { class: 'actions', style: 'margin-top:0' },
+        h('a', { class: 'btn', href: '#/redact' }, '⬛ ปิดข้อความเดิม (ปิดข้อมูลส่วนตัว)'),
+        h('a', { class: 'btn', href: '#/form' }, '✍️ พิมพ์ข้อความใหม่ทับ (เพิ่มข้อมูลใน PDF)'),
+        h('button', { class: 'btn primary', onclick: () => { scanBox.classList.add('hidden'); dz.classList.remove('hidden'); guide.classList.remove('hidden'); } }, 'เลือกไฟล์อื่น')),
+      h('p', { style: 'margin:12px 0 0;color:var(--muted);font-size:13px' }, 'เคล็ดลับ: ใช้ "ปิดข้อมูลส่วนตัว" แบบกรอบสีขาวลบของเดิม แล้วใช้ "เพิ่มข้อมูลใน PDF" พิมพ์ข้อความใหม่ลงตำแหน่งเดิม'));
+    scanBox.classList.remove('hidden');
+  }
 
   const updCount = () => {
     const n = edits.size;
@@ -236,10 +266,14 @@ export default function (root) {
       file = f; bytes = r.bytes; gen++; edits.clear();
       if (pdf) pdf.destroy();
       pdf = await loadPdfJs(bytes);
+      const info = await textInfo(pdf);
+      st.set('');
+      if (info.chars < 5) { pdf.destroy(); pdf = null; bytes = null; dz.classList.add('hidden'); guide.classList.add('hidden'); showScanned(f.name); return; }
+      scanBox.classList.add('hidden'); guide.classList.add('hidden');
       dz.classList.add('hidden'); panel.classList.remove('hidden');
       await renderPages();
-      const n = pages.reduce((s, p) => s + p.lines.length, 0);
-      st.set(n ? '' : 'ไม่พบข้อความที่แก้ได้ — ไฟล์นี้อาจเป็นไฟล์สแกน (เป็นรูปภาพ) ลองใช้เครื่องมือ "เพิ่มข้อมูลใน PDF" แทน', n ? '' : 'err');
+      const imgPages = pages.filter(p => !p.lines.length).map(p => p.i + 1);
+      st.set(imgPages.length ? `หน้า ${imgPages.join(', ')} เป็นภาพสแกน แก้ข้อความไม่ได้ — หน้าอื่นแก้ได้ตามปกติ` : '', imgPages.length ? 'err' : '');
       updCount();
     } catch (e) { st.error(e); }
   }
@@ -277,7 +311,8 @@ export default function (root) {
         overlay.append(btn);
       });
       pages.push(P);
-      docEl.append(h('div', { class: 'page-wrap', style: `width:${cssW}px` }, h('span', { class: 'plabel' }, `หน้า ${i + 1}`), img, overlay));
+      const badge = lines.length ? null : h('div', { class: 'scan-badge' }, '📷 หน้านี้เป็นภาพสแกน — แก้ข้อความไม่ได้');
+      docEl.append(h('div', { class: 'page-wrap', style: `width:${cssW}px` }, h('span', { class: 'plabel' }, `หน้า ${i + 1}`), img, overlay, badge));
       await tick();
     }
     if (pdf.numPages > n) docEl.append(h('div', { class: 'sub' }, `แสดง ${n} หน้าแรก`));
@@ -359,6 +394,7 @@ export default function (root) {
 
   function reset() {
     if (edits.size && !confirm('การแก้ไขจะหายไป ต้องการเลือกไฟล์ใหม่หรือไม่?')) return;
+    guide.classList.remove('hidden'); scanBox.classList.add('hidden');
     gen++; closeEditor(); edits.clear(); file = bytes = null; if (pdf) { pdf.destroy(); pdf = null; }
     docEl.innerHTML = ''; res.innerHTML = ''; st.set(''); unsaved.value = false;
     panel.classList.add('hidden'); dz.classList.remove('hidden');
