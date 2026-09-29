@@ -70,27 +70,65 @@ function signatureModal(onDone) {
 
   // draw
   const pad = h('canvas', { class: 'sigpad' });
-  let strokes = [], cur = null;
-  const redraw = () => {
-    const ctx = pad.getContext('2d');
-    ctx.clearRect(0, 0, pad.width, pad.height);
-    ctx.lineCap = ctx.lineJoin = 'round';
-    for (const s of strokes) {
-      ctx.strokeStyle = s.color; ctx.lineWidth = s.width * (devicePixelRatio || 1);
-      ctx.beginPath();
-      s.pts.forEach((p, i) => {
-        if (i === 0) ctx.moveTo(p[0], p[1]);
-        else { const q = s.pts[i - 1]; ctx.quadraticCurveTo(q[0], q[1], (p[0] + q[0]) / 2, (p[1] + q[1]) / 2); }
-      });
-      if (s.pts.length === 1) ctx.lineTo(s.pts[0][0] + 0.1, s.pts[0][1]);
-      ctx.stroke();
-    }
+  let strokes = [], cur = null, rect = null, ctx = null;
+  // Low-latency canvas: `desynchronized` lets the browser show ink without waiting for the page compositor.
+  const getCtx = () => {
+    if (!ctx) ctx = pad.getContext('2d', { desynchronized: true }) || pad.getContext('2d');
+    return ctx;
   };
-  const sizePad = () => { const r = pad.getBoundingClientRect(); const d = devicePixelRatio || 1; pad.width = r.width * d; pad.height = r.height * d; redraw(); };
-  const pt = (e) => { const r = pad.getBoundingClientRect(); const d = pad.width / r.width; return [(e.clientX - r.left) * d, (e.clientY - r.top) * d]; };
-  pad.onpointerdown = (e) => { pad.setPointerCapture(e.pointerId); cur = { color, width, pts: [pt(e)] }; strokes.push(cur); redraw(); };
-  pad.onpointermove = (e) => { if (cur) { cur.pts.push(pt(e)); redraw(); } };
-  pad.onpointerup = pad.onpointercancel = () => { cur = null; };
+  const style = (s) => {
+    const c = getCtx();
+    c.lineCap = c.lineJoin = 'round';
+    c.strokeStyle = s.color; c.lineWidth = s.width * (devicePixelRatio || 1);
+    return c;
+  };
+  /** Draw only the newest piece of a stroke (from point i-1 to i) — O(1) per move. */
+  const drawSegment = (s, i) => {
+    const c = style(s), p = s.pts;
+    c.beginPath();
+    if (i === 0) { c.moveTo(p[0][0], p[0][1]); c.lineTo(p[0][0] + 0.1, p[0][1]); }
+    else if (i === 1) { c.moveTo(p[0][0], p[0][1]); c.lineTo((p[0][0] + p[1][0]) / 2, (p[0][1] + p[1][1]) / 2); }
+    else {
+      // smooth curve between the midpoints of the last two segments
+      const a = p[i - 2], b = p[i - 1], d = p[i];
+      c.moveTo((a[0] + b[0]) / 2, (a[1] + b[1]) / 2);
+      c.quadraticCurveTo(b[0], b[1], (b[0] + d[0]) / 2, (b[1] + d[1]) / 2);
+    }
+    c.stroke();
+  };
+  /** Finish the stroke up to the pen's final position (the midpoint smoothing lags half a segment). */
+  const drawTail = (s) => {
+    const p = s.pts, n = p.length;
+    if (n < 2) return;
+    const c = style(s);
+    c.beginPath();
+    c.moveTo((p[n - 2][0] + p[n - 1][0]) / 2, (p[n - 2][1] + p[n - 1][1]) / 2);
+    c.lineTo(p[n - 1][0], p[n - 1][1]);
+    c.stroke();
+  };
+  /** Full repaint — only needed for undo / clear / resize. */
+  const redraw = () => {
+    getCtx().clearRect(0, 0, pad.width, pad.height);
+    for (const s of strokes) { s.pts.forEach((_, i) => drawSegment(s, i)); drawTail(s); }
+  };
+  const sizePad = () => { const r = pad.getBoundingClientRect(); const d = devicePixelRatio || 1; pad.width = r.width * d; pad.height = r.height * d; ctx = null; redraw(); };
+  // Rect is measured once per stroke; reading layout on every move event forces reflow.
+  const pt = (e) => { const k = pad.width / rect.width; return [(e.clientX - rect.left) * k, (e.clientY - rect.top) * k]; };
+  pad.onpointerdown = (e) => {
+    e.preventDefault();
+    try { pad.setPointerCapture(e.pointerId); } catch { /* synthetic events */ }
+    rect = pad.getBoundingClientRect();
+    cur = { color, width, pts: [pt(e)] };
+    strokes.push(cur);
+    drawSegment(cur, 0);
+  };
+  pad.onpointermove = (e) => {
+    if (!cur) return;
+    // Apple Pencil reports up to 240 Hz but events fire once per frame; the coalesced list has every sample.
+    const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    for (const ev of (evs.length ? evs : [e])) { cur.pts.push(pt(ev)); drawSegment(cur, cur.pts.length - 1); }
+  };
+  pad.onpointerup = pad.onpointercancel = () => { if (cur) drawTail(cur); cur = null; };
   const COLOR_NAMES = { '#000000': 'ดำ', '#1a237e': 'น้ำเงินเข้ม', '#0d47a1': 'น้ำเงิน', '#b71c1c': 'แดง' };
   const colors = h('div', { class: 'row' }, ...['#000000', '#1a237e', '#0d47a1', '#b71c1c'].map(c =>
     h('button', { type: 'button', class: 'btn sm swatch' + (c === color ? ' on' : ''), title: 'สีหมึก' + COLOR_NAMES[c], 'aria-pressed': String(c === color), style: `background:${c}`,
