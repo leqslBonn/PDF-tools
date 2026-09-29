@@ -1,9 +1,36 @@
-import { h, dropzone, readBytes, statusBar, download, resultBox, fmtSize, baseName, seg, field, textToPng, imageToCanvas, canvasToBytes, pickFiles, toThaiDigits } from '../lib.js';
+import { h, dropzone, readPdf, busy, toast, statusBar, download, resultBox, fmtSize, baseName, seg, field, textToPng, imageToCanvas, canvasToBytes, pickFiles, toThaiDigits } from '../lib.js';
 import { createEditor, stampItems } from '../editor.js';
 
 const STORE = 'pdftk.signatures';
 const loadSaved = () => { try { return JSON.parse(localStorage.getItem(STORE) || '[]'); } catch { return []; } };
-const saveSaved = (a) => { try { localStorage.setItem(STORE, JSON.stringify(a.slice(0, 6))); } catch { /* storage unavailable */ } };
+const saveSaved = (a) => {
+  // Drop the oldest signatures until it fits (browser storage is ~5 MB).
+  for (let list = a.slice(0, 6); ; list = list.slice(0, -1)) {
+    try { localStorage.setItem(STORE, JSON.stringify(list)); return true; }
+    catch {
+      if (list.length <= 1) { toast('บันทึกลายเซ็นไว้ในเครื่องไม่ได้ (พื้นที่เบราว์เซอร์เต็มหรือถูกปิดไว้) — ยังใช้ลายเซ็นนี้ได้ตามปกติ', 4500); return false; }
+    }
+  }
+};
+
+/** Keep stored signatures small: long side at most `max` px. */
+function shrink(c, max = 900) {
+  const k = max / Math.max(c.width, c.height);
+  if (k >= 1) return c;
+  const o = document.createElement('canvas');
+  o.width = Math.round(c.width * k); o.height = Math.round(c.height * k);
+  const ctx = o.getContext('2d'); ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(c, 0, 0, o.width, o.height);
+  return o;
+}
+
+/** Today's date in the three styles offered for the date stamp. */
+export function thaiDate(style, d = new Date()) {
+  const y = d.getFullYear() + 543;
+  const months = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  const s = style === 'long' ? `${d.getDate()} ${months[d.getMonth()]} ${y}` : `${d.getDate()}/${d.getMonth() + 1}/${y}`;
+  return style === 'thai' ? toThaiDigits(s) : s;
+}
 
 /** Crop transparent/white borders from a canvas. */
 export function trimCanvas(c, pad = 6) {
@@ -64,8 +91,10 @@ function signatureModal(onDone) {
   pad.onpointerdown = (e) => { pad.setPointerCapture(e.pointerId); cur = { color, width, pts: [pt(e)] }; strokes.push(cur); redraw(); };
   pad.onpointermove = (e) => { if (cur) { cur.pts.push(pt(e)); redraw(); } };
   pad.onpointerup = pad.onpointercancel = () => { cur = null; };
+  const COLOR_NAMES = { '#000000': 'ดำ', '#1a237e': 'น้ำเงินเข้ม', '#0d47a1': 'น้ำเงิน', '#b71c1c': 'แดง' };
   const colors = h('div', { class: 'row' }, ...['#000000', '#1a237e', '#0d47a1', '#b71c1c'].map(c =>
-    h('button', { type: 'button', class: 'btn sm swatch' + (c === color ? ' on' : ''), title: c, style: `background:${c}`, onclick: (e) => { color = c; e.currentTarget.parentNode.querySelectorAll('.swatch').forEach(x => x.classList.toggle('on', x === e.currentTarget)); } })),
+    h('button', { type: 'button', class: 'btn sm swatch' + (c === color ? ' on' : ''), title: 'สีหมึก' + COLOR_NAMES[c], 'aria-pressed': String(c === color), style: `background:${c}`,
+      onclick: (e) => { color = c; e.currentTarget.parentNode.querySelectorAll('.swatch').forEach(x => { x.classList.toggle('on', x === e.currentTarget); x.setAttribute('aria-pressed', String(x === e.currentTarget)); }); } })),
   field('ความหนา', (() => { const r = h('input', { type: 'range', min: 1, max: 8, value: width }); r.oninput = () => width = +r.value; return r; })()),
   h('button', { class: 'btn sm', onclick: () => { strokes.pop(); redraw(); } }, '↶ ย้อน'),
   h('button', { class: 'btn sm', onclick: () => { strokes = []; redraw(); } }, 'ล้าง'));
@@ -124,6 +153,7 @@ function signatureModal(onDone) {
     if (mode === 'draw') { c = trimCanvas(pad, 8); if (!c) return alert('กรุณาวาดลายเซ็นก่อน'); }
     else if (mode === 'upload') { c = upCanvas; if (!c) return alert('กรุณาเลือกรูป'); }
     else { if (!tIn.value.trim()) return alert('กรุณาพิมพ์ข้อความ'); c = (await textToPng(tIn.value.trim(), { size: 48, font, color, scale: 3 })).canvas; c = trimCanvas(c, 10) || c; }
+    c = shrink(c);
     const src = c.toDataURL('image/png');
     close();
     onDone({ src, aspect: c.width / c.height }, saveChk.checked);
@@ -133,7 +163,7 @@ function signatureModal(onDone) {
 async function dataUrlBytes(url) { return new Uint8Array(await (await fetch(url)).arrayBuffer()); }
 
 export default function (root) {
-  let file, bytes;
+  let file, bytes, gen = 0;
   const st = statusBar();
   const res = h('div');
   const edHost = h('div');
@@ -149,16 +179,16 @@ export default function (root) {
     h('div', { style: 'margin:12px 0 6px;font-size:13px;color:var(--muted)' }, 'ลายเซ็นที่บันทึกไว้ (คลิกเพื่อวาง)'),
     savedEl,
     h('div', { style: 'margin:14px 0 6px;font-size:13px;color:var(--muted)' }, 'เพิ่มวันที่'),
-    h('div', { class: 'row' }, seg([['arabic', '29/9/2569'], ['thai', '๒๙/๙/๒๕๖๙'], ['long', '29 ก.ย. 2569']], dateDigits, v => dateDigits = v),
+    h('div', { class: 'row' }, seg([['arabic', thaiDate('arabic')], ['thai', thaiDate('thai')], ['long', thaiDate('long')]], dateDigits, v => dateDigits = v),
       h('button', { class: 'btn sm', onclick: addDate }, '+ วันที่')),
     h('hr', { style: 'border-color:var(--line);margin:16px 0' }),
     selInfo,
-    h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: run }, 'บันทึก PDF')),
+    h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: busy(run) }, 'บันทึก PDF')),
     st, res);
   const panel = h('div', { class: 'hidden' }, h('div', { class: 'editor-layout' }, edHost, side));
   const dz = dropzone({ accept: '.pdf', hint: 'เลือกเอกสารที่ต้องการเซ็น', onFiles: load });
   root.append(dz, panel);
-  const ed = createEditor(edHost, { onSelect: () => { res.innerHTML = ''; } });
+  const ed = createEditor(edHost, { onSelect: () => { gen++; res.innerHTML = ''; }, onChange: () => { gen++; res.innerHTML = ''; } });
   drawSaved();
 
   function drawSaved() {
@@ -166,8 +196,8 @@ export default function (root) {
     const a = loadSaved();
     if (!a.length) savedEl.append(h('span', { class: 'sub', style: 'font-size:13px;color:var(--muted)' }, '— ยังไม่มี —'));
     a.forEach((s, i) => savedEl.append(h('div', { class: 's', title: 'คลิกเพื่อวาง', onclick: () => place(s) },
-      h('img', { src: s.src }),
-      h('button', { class: 'del', style: 'display:block', onclick: (e) => { e.stopPropagation(); a.splice(i, 1); saveSaved(a); drawSaved(); } }, '×'))));
+      h('img', { src: s.src, alt: `ลายเซ็นที่บันทึกไว้ ${i + 1}` }),
+      h('button', { class: 'del', title: 'ลบลายเซ็นที่บันทึกไว้', style: 'display:block', onclick: (e) => { e.stopPropagation(); a.splice(i, 1); saveSaved(a); drawSaved(); } }, '×'))));
   }
   async function place(sig) {
     if (!bytes) return;
@@ -175,29 +205,35 @@ export default function (root) {
   }
   async function addDate() {
     if (!bytes) return;
-    const d = new Date(), y = d.getFullYear() + 543;
-    const months = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
-    let s = dateDigits === 'long' ? `${d.getDate()} ${months[d.getMonth()]} ${y}` : `${d.getDate()}/${d.getMonth() + 1}/${y}`;
-    if (dateDigits === 'thai') s = toThaiDigits(s);
-    const t = await textToPng(s, { size: 14, color: '#1a237e' });
+    const t = await textToPng(thaiDate(dateDigits), { size: 14, color: '#1a237e' });
     const src = t.canvas.toDataURL();
-    ed.add({ src, bytes: t.bytes, type: 'png', aspect: t.w / t.h }, { widthFrac: Math.min(0.5, t.w / 595) });
+    ed.add({ src, bytes: t.bytes, type: 'png', aspect: t.w / t.h }, { widthFrac: Math.min(0.5, t.w / ed.pagePts()) });
   }
-  function reset() { file = bytes = null; ed.clear(); res.innerHTML = ''; panel.classList.add('hidden'); dz.classList.remove('hidden'); }
+  function reset() {
+    if (ed.items().length && !confirm('ลายเซ็นที่วางไว้จะหายไป ต้องการเลือกไฟล์ใหม่หรือไม่?')) return;
+    gen++; file = bytes = null; ed.destroy(); res.innerHTML = ''; st.set(''); panel.classList.add('hidden'); dz.classList.remove('hidden');
+  }
   async function load([f]) {
-    file = f; bytes = await readBytes(f);
-    dz.classList.add('hidden'); panel.classList.remove('hidden');
-    st.set('กำลังแสดงเอกสาร...');
-    try { await ed.load(bytes); st.set(''); } catch (e) { st.error(e); }
+    st.set('กำลังอ่านไฟล์...');
+    try {
+      const r = await readPdf(f);
+      file = f; bytes = r.bytes; gen++;
+      dz.classList.add('hidden'); panel.classList.remove('hidden');
+      st.set('กำลังแสดงเอกสาร...');
+      await ed.load(bytes);
+      st.set(r.unlocked ? '🔓 ปลดล็อกไฟล์แล้ว' : '');
+    } catch (e) { st.error(e); }
   }
   async function run() {
     res.innerHTML = '';
     if (!ed.items().length) return st.set('ยังไม่ได้วางลายเซ็น', 'err');
+    const my = gen, name = baseName(file.name) + '_signed.pdf';
     try {
       st.set('กำลังบันทึก...');
       const out = await stampItems(bytes, ed.items());
       st.set('');
-      res.append(resultBox(fmtSize(out.length), () => download(out, baseName(file.name) + '_signed.pdf')));
+      if (my !== gen) return;
+      res.append(resultBox(fmtSize(out.length), () => { download(out, name); ed.saved(); }));
     } catch (e) { st.error(e); }
   }
 }

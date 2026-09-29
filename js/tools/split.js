@@ -1,4 +1,4 @@
-import { h, dropzone, readBytes, statusBar, download, downloadZip, loadPdfJs, resultBox, PL, savePdf, fmtSize, baseName, seg, field, pageTile, fillThumbs } from '../lib.js';
+import { h, dropzone, readPdf, statusBar, download, downloadZip, loadPdfJs, resultBox, PL, savePdf, fmtSize, baseName, seg, field, pageTile, fillThumbs, copyInto, busy, onLeave } from '../lib.js';
 
 /** Parse "1-3, 5, 8-" into groups of 0-based indices. */
 export function parseRanges(str, total) {
@@ -18,12 +18,14 @@ export function parseRanges(str, total) {
 export async function extractPages(bytes, indices, srcDoc) {
   const src = srcDoc || await PL().PDFDocument.load(bytes);
   const out = await PL().PDFDocument.create();
-  (await out.copyPages(src, indices)).forEach(p => out.addPage(p));
+  await copyInto(out, src, indices);
   return savePdf(out);
 }
 
 export default function (root) {
-  let file, bytes, total = 0, tiles = [], selected = new Set();
+  let file, bytes, total = 0, tiles = [], selected = new Set(), pdf = null, gen = 0;
+  const closePdf = () => { if (pdf) { pdf.destroy(); pdf = null; } };
+  onLeave(closePdf);
   let mode = 'select';
   const grid = h('div', { class: 'pages' });
   const st = statusBar();
@@ -44,26 +46,31 @@ export default function (root) {
 
   const panel = h('div', { class: 'panel hidden' },
     h('div', { class: 'row' },
-      seg([['select', 'เลือกหน้า'], ['range', 'กำหนดช่วงหน้า'], ['every', 'แยกทุก N หน้า']], mode, (v) => { mode = v; showOpts(); }),
+      seg([['select', 'เลือกหน้า'], ['range', 'กำหนดช่วงหน้า'], ['every', 'แยกทุก N หน้า']], mode, (v) => { mode = v; showOpts(); changed(); }),
       h('div', { class: 'spacer' }),
       h('button', { class: 'btn sm', onclick: reset }, 'เลือกไฟล์ใหม่')),
     h('div', { style: 'margin:14px 0' }, optSelect, optRange, optEvery),
     grid,
-    h('div', { class: 'actions' }, h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: run }, 'แยกไฟล์ PDF')),
+    h('div', { class: 'actions' }, h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: busy(run) }, 'แยกไฟล์ PDF')),
     st, res);
   const dz = dropzone({ accept: '.pdf', onFiles: load });
   root.append(dz, panel);
   showOpts();
+  rangeIn.oninput = everyIn.oninput = oneFile.onchange = () => changed();
 
   function showOpts() { for (const [k, el] of Object.entries(opts)) el.classList.toggle('hidden', k !== mode); grid.classList.toggle('hidden', mode !== 'select'); }
-  function reset() { file = null; grid.innerHTML = ''; res.innerHTML = ''; selected.clear(); panel.classList.add('hidden'); dz.classList.remove('hidden'); }
+  function reset() { gen++; closePdf(); file = null; grid.innerHTML = ''; res.innerHTML = ''; st.set(''); selected.clear(); panel.classList.add('hidden'); dz.classList.remove('hidden'); }
+  function changed() { gen++; res.innerHTML = ''; }
   function setAll(on) { selected = new Set(on ? tiles.map((_, i) => i) : []); paint(); }
-  function paint() { tiles.forEach((t, i) => t.classList.toggle('sel', selected.has(i))); selInfo.textContent = `เลือก ${selected.size} หน้า`; }
+  function paint() { changed(); tiles.forEach((t, i) => { t.classList.toggle('sel', selected.has(i)); t.setAttribute('aria-pressed', String(selected.has(i))); }); selInfo.textContent = `เลือก ${selected.size} หน้า`; }
 
   async function load([f]) {
-    file = f; bytes = await readBytes(f);
+    st.set('กำลังอ่านไฟล์...');
     try {
-      const pdf = await loadPdfJs(bytes);
+      const r = await readPdf(f);
+      file = f; bytes = r.bytes;
+      closePdf();
+      pdf = await loadPdfJs(bytes);
       total = pdf.numPages;
       rangeIn.value = `1-${total}`;
       tiles = Array.from({ length: total }, (_, i) => {
@@ -73,7 +80,10 @@ export default function (root) {
       });
       grid.innerHTML = ''; grid.append(...tiles); paint();
       dz.classList.add('hidden'); panel.classList.remove('hidden');
-      await fillThumbs(pdf, tiles);
+      st.set(r.unlocked ? '🔓 ปลดล็อกไฟล์แล้ว' : '');
+      const doc = pdf;
+      await fillThumbs(doc, tiles, { stopWhenDetached: true });
+      if (doc === pdf) closePdf();
     } catch (e) { st.error(e); }
   }
 
@@ -95,6 +105,7 @@ export default function (root) {
       }
     } catch (e) { return st.set(e.message, 'err'); }
 
+    const my = gen, base = baseName(file.name);
     try {
       const src = await PL().PDFDocument.load(bytes);
       const outs = [];
@@ -102,11 +113,12 @@ export default function (root) {
         st.set(`กำลังสร้างไฟล์ ${g + 1}/${groups.length}...`); st.progress((g + 1) / groups.length);
         const grp = groups[g];
         const label = grp.length === 1 ? `p${grp[0] + 1}` : `p${grp[0] + 1}-${grp[grp.length - 1] + 1}`;
-        outs.push({ name: `${baseName(file.name)}_${label}.pdf`, data: await extractPages(null, grp, src) });
+        outs.push({ name: `${base}_${label}.pdf`, data: await extractPages(null, grp, src) });
       }
       st.progress(null); st.set('');
+      if (my !== gen) return;
       if (outs.length === 1) res.append(resultBox(`${groups[0].length} หน้า · ${fmtSize(outs[0].data.length)}`, () => download(outs[0].data, outs[0].name)));
-      else res.append(resultBox(`แยกได้ ${outs.length} ไฟล์ (รวมเป็น .zip)`, () => downloadZip(outs, baseName(file.name) + '_split.zip')));
+      else res.append(resultBox(`แยกได้ ${outs.length} ไฟล์ (รวมเป็น .zip)`, () => downloadZip(outs, base + '_split.zip')));
     } catch (e) { st.error(e); }
   }
 }

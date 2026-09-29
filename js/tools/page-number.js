@@ -1,4 +1,4 @@
-import { h, dropzone, readBytes, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, seg, field, textToPng, toThaiDigits, pageGeom, drawVisual, loadPdfJs, renderPage } from '../lib.js';
+import { h, dropzone, readPdf, busy, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, seg, field, textToPng, toThaiDigits, pageGeom, drawVisual, loadPdfJs, renderPage } from '../lib.js';
 
 export const FORMATS = {
   n: (n) => `${n}`,
@@ -9,14 +9,15 @@ export const FORMATS = {
 };
 
 /**
- * opts: { pos: 'tl'|'tc'|'tr'|'bl'|'bc'|'br', digits: 'arabic'|'thai', format, start, size, margin, color, skipFirst, from, to }
+ * opts: { pos: 'tl'|'tc'|'tr'|'bl'|'bc'|'br', digits: 'arabic'|'thai', format, start, size, margin, color, skipFirst,
+ *         pageCount (real page count, when numbering a preview subset) }
  */
 export async function addPageNumbers(bytes, o = {}) {
   const { pos = 'bc', digits = 'arabic', format = 'n', start = 1, size = 12, margin = 28, color = '#000000', skipFirst = false } = o;
   const doc = await PL().PDFDocument.load(bytes);
   const pages = doc.getPages();
   const first = skipFirst ? 1 : 0;
-  const total = pages.length - first + start - 1;
+  const total = (o.pageCount || pages.length) - first + start - 1;
   const cache = new Map();
   for (let i = first; i < pages.length; i++) {
     const n = i - first + start;
@@ -37,7 +38,7 @@ export async function addPageNumbers(bytes, o = {}) {
 }
 
 export default function (root) {
-  let file, bytes, previewSrc;
+  let file, bytes, previewSrc, pageCount = 0, gen = 0;
   const o = { pos: 'bc', digits: 'arabic', format: 'n', start: 1, size: 12, margin: 28, color: '#000000', skipFirst: false };
   const st = statusBar();
   const res = h('div');
@@ -47,10 +48,16 @@ export default function (root) {
   const drawPos = () => {
     posGrid.innerHTML = '';
     positions.forEach(p => posGrid.append(h('button', { type: 'button', class: 'btn sm' + (o.pos === p ? ' primary' : ''), style: 'height:34px',
-      title: p, onclick: () => { o.pos = p; drawPos(); refresh(); } }, { tl: '↖', tc: '↑', tr: '↗', bl: '↙', bc: '↓', br: '↘' }[p])));
+      title: { tl: 'บนซ้าย', tc: 'บนกลาง', tr: 'บนขวา', bl: 'ล่างซ้าย', bc: 'ล่างกลาง', br: 'ล่างขวา' }[p], 'aria-pressed': String(o.pos === p), onclick: () => { o.pos = p; drawPos(); refresh(); } }, { tl: '↖', tc: '↑', tr: '↗', bl: '↙', bc: '↓', br: '↘' }[p])));
   };
   drawPos();
-  const num = (k, min, max) => { const i = h('input', { type: 'number', min, max, value: o[k] }); i.oninput = () => { o[k] = +i.value || 0; refresh(); }; return i; };
+  const num = (k, min, max) => {
+    const i = h('input', { type: 'number', min, max, value: o[k] });
+    // Clamp so a half-typed value (empty, 0) never produces a zero-size label.
+    i.oninput = () => { const v = +i.value; if (i.value === '' || isNaN(v)) return; o[k] = Math.min(max, Math.max(min, v)); refresh(); };
+    i.onblur = () => { i.value = o[k]; };
+    return i;
+  };
   const fmtSel = h('select', {}, ...Object.entries({ n: '1', page: 'หน้า 1', of: '1 / 10', pageof: 'หน้า 1 จาก 10', dash: '- 1 -' }).map(([v, l]) => h('option', { value: v }, l)));
   fmtSel.onchange = () => { o.format = fmtSel.value; refresh(); };
   const color = h('input', { type: 'color', value: o.color }); color.oninput = () => { o.color = color.value; refresh(); };
@@ -67,31 +74,34 @@ export default function (root) {
         h('div', { class: 'row' }, field('เริ่มที่เลข', num('start', 0, 9999)), field('ขนาดตัวอักษร', num('size', 6, 72))),
         h('div', { class: 'row' }, field('ระยะจากขอบ (pt)', num('margin', 0, 200)), field('สี', color)),
         h('div', { class: 'row' }, h('label', { class: 'check' }, skip, 'ไม่ใส่เลขหน้าแรก (หน้าปก)')),
-        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: run }, 'ใส่เลขหน้า')),
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: busy(run) }, 'ใส่เลขหน้า')),
         st, res)));
   const dz = dropzone({ accept: '.pdf', onFiles: load });
   root.append(dz, panel);
 
-  function reset() { file = null; res.innerHTML = ''; panel.classList.add('hidden'); dz.classList.remove('hidden'); }
+  function reset() { gen++; file = bytes = previewSrc = null; res.innerHTML = ''; preview.innerHTML = ''; st.set(''); panel.classList.add('hidden'); dz.classList.remove('hidden'); }
   async function load([f]) {
-    file = f; bytes = await readBytes(f);
+    st.set('กำลังอ่านไฟล์...');
     try {
+      const r = await readPdf(f);
+      file = f; bytes = r.bytes; pageCount = r.pages;
       const src = await PL().PDFDocument.load(bytes);
       const tmp = await PL().PDFDocument.create();
       (await tmp.copyPages(src, [...Array(Math.min(2, src.getPageCount())).keys()])).forEach(p => tmp.addPage(p));
       previewSrc = await tmp.save();
     } catch (e) { return st.error(e); }
+    st.set('');
     dz.classList.add('hidden'); panel.classList.remove('hidden');
     refresh();
   }
   let timer, previewSeq = 0;
-  function refresh() { clearTimeout(timer); timer = setTimeout(drawPreview, 250); res.innerHTML = ''; }
+  function refresh() { gen++; clearTimeout(timer); timer = setTimeout(drawPreview, 250); res.innerHTML = ''; }
   async function drawPreview() {
     if (!bytes) return;
     try {
       // Preview: first 2 pages only, with numbers applied.
       const seq = ++previewSeq;
-      const out = await addPageNumbers(previewSrc, { ...o });
+      const out = await addPageNumbers(previewSrc, { ...o, pageCount });
       if (seq !== previewSeq) return;
       const pdf = await loadPdfJs(out);
       const n = pdf.numPages;
@@ -105,12 +115,14 @@ export default function (root) {
     } catch (e) { st.error(e); }
   }
   async function run() {
+    const my = gen, name = baseName(file.name) + '_numbered.pdf';
     try {
       st.set('กำลังใส่เลขหน้า...');
-      const out = await addPageNumbers(bytes, o);
+      const out = await addPageNumbers(bytes, { ...o });
       st.set('');
+      if (my !== gen) return;
       res.innerHTML = '';
-      res.append(resultBox(fmtSize(out.length), () => download(out, baseName(file.name) + '_numbered.pdf')));
+      res.append(resultBox(fmtSize(out.length), () => download(out, name)));
     } catch (e) { st.error(e); }
   }
 }

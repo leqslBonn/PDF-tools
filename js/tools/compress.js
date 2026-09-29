@@ -1,4 +1,4 @@
-import { h, dropzone, readBytes, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, seg, field, loadPdfJs, renderPage, canvasToBytes, tick } from '../lib.js';
+import { h, dropzone, readPdf, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, seg, field, loadPdfJs, renderPage, canvasToBytes, tick, busy, freeCanvas } from '../lib.js';
 
 export const LEVELS = {
   low: { maxPx: 2400, q: 0.82, dpi: 150, label: 'น้อย (คุณภาพสูง)' },
@@ -97,6 +97,7 @@ export async function rasterizePdf(bytes, { dpi, q }, onProgress) {
     const vp = page.getViewport({ scale: 1 });
     const c = await renderPage(pdf, i, { scale: dpi / 72 });
     const img = await out.embedJpg(await canvasToBytes(c, 'image/jpeg', q));
+    freeCanvas(c);
     out.addPage([vp.width, vp.height]).drawImage(img, { x: 0, y: 0, width: vp.width, height: vp.height });
     onProgress && onProgress(i / pdf.numPages);
   }
@@ -118,28 +119,35 @@ export default function (root) {
   const panel = h('div', { class: 'panel hidden' },
     info,
     h('div', { class: 'row', style: 'margin-top:14px' },
-      field('ระดับการบีบอัด', seg(Object.entries(LEVELS).map(([k, v]) => [k, v.label]), level, v => { level = v; res.innerHTML = ''; })),
+      field('ระดับการบีบอัด', seg(Object.entries(LEVELS).map(([k, v]) => [k, v.label]), level, v => { level = v; gen++; res.innerHTML = ''; })),
     ),
     h('div', { class: 'row' },
-      field('วิธีบีบอัด', seg([['smart', 'บีบอัดรูปภาพ (คงข้อความ)'], ['raster', 'แปลงทั้งหน้าเป็นภาพ']], mode, v => { mode = v; setNote(); res.innerHTML = ''; })),
+      field('วิธีบีบอัด', seg([['smart', 'บีบอัดรูปภาพ (คงข้อความ)'], ['raster', 'แปลงทั้งหน้าเป็นภาพ']], mode, v => { mode = v; setNote(); gen++; res.innerHTML = ''; })),
     ),
     modeNote,
     h('div', { class: 'actions' },
       h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'),
-      h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: run }, 'ลดขนาด PDF')),
+      h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: busy(run) }, 'ลดขนาด PDF')),
     st, res);
   const dz = dropzone({ accept: '.pdf', onFiles: load });
   root.append(dz, panel);
 
-  function reset() { file = null; res.innerHTML = ''; panel.classList.add('hidden'); dz.classList.remove('hidden'); st.set(''); }
+  let gen = 0;
+  function reset() { gen++; file = null; res.innerHTML = ''; panel.classList.add('hidden'); dz.classList.remove('hidden'); st.set(''); }
   async function load([f]) {
-    file = f; bytes = await readBytes(f);
+    st.set('กำลังอ่านไฟล์...');
+    let r;
+    try { r = await readPdf(f); } catch (e) { return st.error(e); }
+    st.set('');
+    gen++; res.innerHTML = '';
+    file = f; bytes = r.bytes;
     info.innerHTML = '';
-    info.append(h('div', { class: 'meta' }, h('div', { class: 'name' }, f.name), h('div', { class: 'sub' }, 'ขนาดเดิม ' + fmtSize(f.size))));
+    info.append(h('div', { class: 'meta' }, h('div', { class: 'name' }, f.name), h('div', { class: 'sub' }, 'ขนาดเดิม ' + fmtSize(f.size) + (r.unlocked ? ' · 🔓 ปลดล็อกแล้ว (ไฟล์ผลลัพธ์จะไม่มีรหัส)' : ''))));
     dz.classList.add('hidden'); panel.classList.remove('hidden');
   }
   async function run() {
     res.innerHTML = '';
+    const my = gen, name = baseName(file.name) + '_compressed.pdf';
     try {
       st.set('กำลังบีบอัด...'); st.progress(0);
       const L = LEVELS[level];
@@ -149,13 +157,14 @@ export default function (root) {
         out = r.bytes; detail = r.images ? ` · บีบอัดรูป ${r.changed}/${r.images} รูป` : ' · ไม่พบรูปภาพในเอกสาร';
       } else out = await rasterizePdf(bytes, L, p => st.progress(p));
       st.progress(null); st.set('');
+      if (my !== gen) return;
       if (out.length >= bytes.length) {
         res.append(h('div', { class: 'status err' }, `ไม่สามารถลดขนาดได้อีก (ผลลัพธ์ ${fmtSize(out.length)} ไม่เล็กกว่าเดิม ${fmtSize(bytes.length)})${detail}` +
           (mode === 'smart' ? ' — ลองเลือก "แปลงทั้งหน้าเป็นภาพ" หรือเพิ่มระดับการบีบอัด' : ' — ลองวิธี "บีบอัดรูปภาพ"')));
         return;
       }
       const pct = Math.round((1 - out.length / bytes.length) * 100);
-      res.append(resultBox(`${fmtSize(bytes.length)} → ${fmtSize(out.length)} (ลดลง ${pct}%)${detail}`, () => download(out, baseName(file.name) + '_compressed.pdf')));
+      res.append(resultBox(`${fmtSize(bytes.length)} → ${fmtSize(out.length)} (ลดลง ${pct}%)${detail}`, () => download(out, name)));
     } catch (e) { st.error(e); }
   }
 }

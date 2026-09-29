@@ -1,4 +1,4 @@
-import { h, dropzone, readBytes, statusBar, download, resultBox, PL, fmtSize, baseName, field } from '../lib.js';
+import { h, dropzone, readPdf, busy, statusBar, download, resultBox, PL, fmtSize, baseName, field } from '../lib.js';
 
 /** o: { userPassword, ownerPassword?, print, copy, modify } */
 export async function protectPdf(bytes, o) {
@@ -45,27 +45,37 @@ export default function (root) {
         h('label', { class: 'check' }, modify, 'อนุญาตให้แก้ไข'))),
     h('div', { class: 'actions' },
       h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'),
-      h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: run }, '🔒 ใส่รหัสผ่าน')),
+      h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: busy(run) }, '🔒 ใส่รหัสผ่าน')),
     st, res);
   const dz = dropzone({ accept: '.pdf', onFiles: load });
   root.append(dz, panel);
 
-  function reset() { file = null; res.innerHTML = ''; pw.value = pw2.value = owner.value = ''; panel.classList.add('hidden'); dz.classList.remove('hidden'); st.set(''); }
+  let gen = 0;
+  [pw, pw2, owner].forEach(i => i.addEventListener('input', () => { gen++; res.innerHTML = ''; }));
+  [print, copy, modify].forEach(i => i.addEventListener('change', () => { gen++; res.innerHTML = ''; }));
+  function reset() { gen++; file = null; res.innerHTML = ''; pw.value = pw2.value = owner.value = ''; panel.classList.add('hidden'); dz.classList.remove('hidden'); st.set(''); }
   async function load([f]) {
-    file = f; bytes = await readBytes(f);
+    st.set('กำลังอ่านไฟล์...');
+    let r;
+    try { r = await readPdf(f); } catch (e) { return st.error(e); }
+    st.set(''); gen++; res.innerHTML = '';
+    file = f; bytes = r.bytes;
     info.innerHTML = '';
-    info.append(h('div', { class: 'meta' }, h('div', { class: 'name' }, f.name), h('div', { class: 'sub' }, fmtSize(f.size))));
+    info.append(h('div', { class: 'meta' }, h('div', { class: 'name' }, f.name),
+      h('div', { class: 'sub' }, fmtSize(f.size) + (r.unlocked ? ' · ไฟล์เดิมมีรหัสอยู่แล้ว จะถูกแทนด้วยรหัสใหม่' : ''))));
     dz.classList.add('hidden'); panel.classList.remove('hidden'); pw.focus();
   }
   async function run() {
     res.innerHTML = '';
     if (pw.value.length < 1) return st.set('กรุณากรอกรหัสผ่าน', 'err');
     if (pw.value !== pw2.value) return st.set('รหัสผ่านทั้งสองช่องไม่ตรงกัน', 'err');
+    const my = gen, name = baseName(file.name) + '_protected.pdf';
     try {
       st.set('กำลังเข้ารหัส...');
       const out = await protectPdf(bytes, { userPassword: pw.value, ownerPassword: owner.value, print: print.checked, copy: copy.checked, modify: modify.checked });
       st.set('');
-      res.append(resultBox(`เข้ารหัสแล้ว · ${fmtSize(out.length)}`, () => download(out, baseName(file.name) + '_protected.pdf')));
+      if (my !== gen) return;
+      res.append(resultBox(`เข้ารหัสแล้ว · ${fmtSize(out.length)}`, () => download(out, name)));
     } catch (e) { st.error(e); }
   }
 }

@@ -5,9 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PDF Toolkit</title>
   <meta name="description" content="รวมเครื่องมือ PDF ครบในที่เดียว สแกน รวม แยก แปลง ปรับแต่ง ป้องกัน และเซ็นเอกสาร ทำงานในเบราว์เซอร์ ไฟล์ไม่ถูกส่งขึ้นเซิร์ฟเวอร์">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;700&family=Charm:wght@400;700&family=Mali:wght@500&family=Itim&family=Srisakdi:wght@700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/fonts.css">
+  <!-- Preload every tool module so all tools keep working if the connection drops after the page opens. -->
+  <link rel="modulepreload" href="js/lib.js">
+  <link rel="modulepreload" href="js/editor.js">
+  <link rel="modulepreload" href="js/scan-core.js">
+  <link rel="modulepreload" href="js/tools/scan.js">
+  <link rel="modulepreload" href="js/tools/merge.js">
+  <link rel="modulepreload" href="js/tools/organize.js">
+  <link rel="modulepreload" href="js/tools/split.js">
+  <link rel="modulepreload" href="js/tools/compress.js">
+  <link rel="modulepreload" href="js/tools/image.js">
+  <link rel="modulepreload" href="js/tools/image-compress.js">
+  <link rel="modulepreload" href="js/tools/jpg-to-pdf.js">
+  <link rel="modulepreload" href="js/tools/page-number.js">
+  <link rel="modulepreload" href="js/tools/watermark.js">
+  <link rel="modulepreload" href="js/tools/crop.js">
+  <link rel="modulepreload" href="js/tools/protect.js">
+  <link rel="modulepreload" href="js/tools/sign.js">
+  <link rel="modulepreload" href="js/tools/form.js">
   <meta name="theme-color" content="#f6f4fe" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0e0b1a" media="(prefers-color-scheme: dark)">
   <script>try { var t = localStorage.getItem('pdftk-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>

@@ -1,4 +1,5 @@
-import { h, dropzone, readBytes, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, pageGeom, loadPdfJs, renderPage, MAX_PREVIEW_PAGES } from '../lib.js';
+import { h, dropzone, readPdf, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, pageGeom, loadPdfJs, renderPage, MAX_PREVIEW_PAGES, busy, freeCanvas } from '../lib.js';
+import { rasterizePdf } from './compress.js';
 
 /** boxes: array (per page) of {l,t,r,b} fractions of the visible page to cut away; missing → `all`. */
 export async function cropPdf(bytes, boxes, all) {
@@ -31,18 +32,29 @@ export function detectMargins(canvas, pad = 0.01) {
 
 /** Draggable crop rectangle over a page element. m = {l,t,r,b}; onChange(m). */
 function cropOverlay(wrap, m, onChange) {
-  const box = h('div', { class: 'cropbox' }, ...['nw', 'ne', 'sw', 'se'].map(k => h('div', { class: 'h ' + k, 'data-k': k })));
+  const box = h('div', { class: 'cropbox', tabindex: 0, role: 'group', 'aria-label': 'กรอบครอบตัด — ใช้ลูกศรเพื่อเลื่อน, Shift+ลูกศรเพื่อปรับขนาด' },
+    ...['nw', 'ne', 'sw', 'se'].map(k => h('div', { class: 'h ' + k, 'data-k': k })));
   const place = () => Object.assign(box.style, { left: m.l * 100 + '%', top: m.t * 100 + '%', right: m.r * 100 + '%', bottom: m.b * 100 + '%' });
   place();
   wrap.append(box);
+  const MIN = 0.05, cl = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  box.onkeydown = (e) => {
+    const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+    if (!d) return;
+    e.preventDefault();
+    const dx = d[0] * 0.01, dy = d[1] * 0.01;
+    if (e.shiftKey) { m.r = cl(m.r - dx, 0, 1 - m.l - MIN); m.b = cl(m.b - dy, 0, 1 - m.t - MIN); }
+    else { const ddx = cl(dx, -m.l, m.r), ddy = cl(dy, -m.t, m.b); m.l += ddx; m.r -= ddx; m.t += ddy; m.b -= ddy; }
+    place(); onChange(m);
+  };
   box.onpointerdown = (e) => {
     e.preventDefault();
+    box.focus({ preventScroll: true });
     const k = e.target.dataset.k || 'move';
     const R = wrap.getBoundingClientRect();
     const sx = e.clientX, sy = e.clientY, s = { ...m };
     const mv = (ev) => {
       const dx = (ev.clientX - sx) / R.width, dy = (ev.clientY - sy) / R.height;
-      const MIN = 0.05, cl = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
       if (k === 'move') {
         const ddx = cl(dx, -s.l, s.r), ddy = cl(dy, -s.t, s.b);
         m.l = s.l + ddx; m.r = s.r - ddx; m.t = s.t + ddy; m.b = s.b - ddy;
@@ -54,16 +66,18 @@ function cropOverlay(wrap, m, onChange) {
       }
       place(); onChange(m);
     };
-    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); };
-    addEventListener('pointermove', mv); addEventListener('pointerup', up);
+    const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); removeEventListener('pointercancel', up); };
+    addEventListener('pointermove', mv); addEventListener('pointerup', up); addEventListener('pointercancel', up);
   };
   box.place = place;
   return box;
 }
 
 export default function (root) {
-  let file, bytes, pages = []; // {m, box, canvas}
+  let file, bytes, pages = [], gen = 0; // pages: {m, box, probe (small canvas for auto-detect)}
   const same = h('input', { type: 'checkbox', checked: true });
+  const secure = h('input', { type: 'checkbox' });
+  secure.onchange = () => { gen++; res.innerHTML = ''; };
   const st = statusBar();
   const res = h('div');
   const docEl = h('div', { class: 'doc' });
@@ -74,50 +88,74 @@ export default function (root) {
         h('h3', {}, 'ครอบตัดขอบ'),
         h('p', { class: 'sub', style: 'margin-top:0;color:var(--muted);font-size:13.5px' }, 'ลากกรอบสีน้ำเงินหรือจุดมุมเพื่อกำหนดพื้นที่ที่ต้องการเก็บไว้ ส่วนที่มืดจะถูกตัดออก'),
         h('label', { class: 'check' }, same, 'ใช้ขอบเดียวกันทุกหน้า'),
+        h('label', { class: 'check', style: 'margin-top:8px' }, secure, 'ลบข้อมูลนอกกรอบออกจริง (แปลงหน้าเป็นภาพ)'),
+        h('p', { class: 'sub', style: 'margin:6px 0 0;color:var(--muted);font-size:12.5px' },
+          'ถ้าไม่ติ๊ก: ส่วนนอกกรอบแค่ถูกซ่อน ยังอยู่ในไฟล์และกู้คืนได้ — ถ้าจะตัดเพื่อปิดข้อมูลสำคัญ ให้ติ๊กช่องนี้ (ข้อความจะคัดลอกไม่ได้)'),
         h('div', { class: 'actions' },
           h('button', { class: 'btn sm', onclick: auto }, '✨ ตัดขอบขาวอัตโนมัติ'),
           h('button', { class: 'btn sm', onclick: () => setAll({ l: 0, t: 0, r: 0, b: 0 }) }, 'รีเซ็ต')),
-        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: run }, 'ครอบตัด PDF')),
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: busy(run) }, 'ครอบตัด PDF')),
         st, res)));
   const dz = dropzone({ accept: '.pdf', hint: 'ปรับขอบครอบของแต่ละหน้าแยกกันได้หลังอัปโหลด', onFiles: load });
   root.append(dz, panel);
 
-  function reset() { file = null; pages = []; docEl.innerHTML = ''; res.innerHTML = ''; panel.classList.add('hidden'); dz.classList.remove('hidden'); }
-  function setAll(m) { pages.forEach(p => { Object.assign(p.m, m); p.box.place(); }); res.innerHTML = ''; }
+  function reset() { gen++; file = null; pages = []; docEl.innerHTML = ''; res.innerHTML = ''; st.set(''); panel.classList.add('hidden'); dz.classList.remove('hidden'); }
+  function setAll(m) { pages.forEach(p => { Object.assign(p.m, m); p.box.place(); }); gen++; res.innerHTML = ''; }
 
   async function load([f]) {
-    file = f; bytes = await readBytes(f);
+    st.set('กำลังอ่านไฟล์...');
     try {
+      const r = await readPdf(f);
+      file = f; bytes = r.bytes;
+      const my = ++gen;
       const pdf = await loadPdfJs(bytes);
       dz.classList.add('hidden'); panel.classList.remove('hidden');
       docEl.innerHTML = ''; pages = [];
       const n = Math.min(pdf.numPages, MAX_PREVIEW_PAGES);
       for (let i = 1; i <= n; i++) {
+        if (my !== gen) { pdf.destroy(); return; }
+        st.set(`กำลังแสดงหน้า ${i}/${n}...`);
         const c = await renderPage(pdf, i, { maxW: 560, maxH: 760 });
-        c.style.width = (c.width / (devicePixelRatio || 1)) + 'px'; c.style.maxWidth = '100%';
-        const wrap = h('div', { class: 'page-wrap page-clip' }, c);
-        const p = { m: { l: 0.05, t: 0.05, r: 0.05, b: 0.05 }, canvas: c };
-        p.box = cropOverlay(wrap, p.m, (m) => { res.innerHTML = ''; if (same.checked) pages.forEach(q => { if (q !== p) { Object.assign(q.m, m); q.box.place(); } }); });
+        // Keep a JPEG <img> for display and a tiny canvas for auto-detect, not 50 full canvases.
+        const img = h('img', { src: c.toDataURL('image/jpeg', 0.85), alt: `หน้า ${i}`, draggable: 'false',
+          style: `display:block;width:${Math.round(c.width / Math.min(2, devicePixelRatio || 1))}px;max-width:100%;height:auto` });
+        const probe = document.createElement('canvas');
+        const k = Math.min(1, 300 / Math.max(c.width, c.height));
+        probe.width = Math.round(c.width * k); probe.height = Math.round(c.height * k);
+        probe.getContext('2d').drawImage(c, 0, 0, probe.width, probe.height);
+        freeCanvas(c);
+        const wrap = h('div', { class: 'page-wrap page-clip' }, img);
+        const p = { m: { l: 0.05, t: 0.05, r: 0.05, b: 0.05 }, probe };
+        p.box = cropOverlay(wrap, p.m, (m) => { gen++; res.innerHTML = ''; if (same.checked) pages.forEach(q => { if (q !== p) { Object.assign(q.m, m); q.box.place(); } }); });
         pages.push(p);
         docEl.append(h('div', { style: 'position:relative;padding-top:20px;max-width:100%' }, h('span', { class: 'plabel', style: 'position:absolute;top:0;left:0;font-size:12px;color:var(--muted)' }, `หน้า ${i}`), wrap));
       }
       if (pdf.numPages > n) docEl.append(h('div', { class: 'sub' }, `หน้าที่ ${n + 1}–${pdf.numPages} จะใช้ขอบเดียวกับหน้าแรก`));
       pdf.destroy();
+      st.set(r.unlocked ? '🔓 ปลดล็อกไฟล์แล้ว' : '');
     } catch (e) { st.error(e); }
   }
   function auto() {
     if (same.checked) {
       // union of content across pages → smallest margins
-      const ms = pages.map(p => detectMargins(p.canvas));
+      const ms = pages.map(p => detectMargins(p.probe));
       setAll({ l: Math.min(...ms.map(m => m.l)), t: Math.min(...ms.map(m => m.t)), r: Math.min(...ms.map(m => m.r)), b: Math.min(...ms.map(m => m.b)) });
-    } else pages.forEach(p => { Object.assign(p.m, detectMargins(p.canvas)); p.box.place(); });
+    } else { pages.forEach(p => { Object.assign(p.m, detectMargins(p.probe)); p.box.place(); }); gen++; res.innerHTML = ''; }
   }
   async function run() {
+    const my = gen, name = baseName(file.name) + '_cropped.pdf';
     try {
       st.set('กำลังครอบตัด...');
-      const out = await cropPdf(bytes, same.checked ? [] : pages.map(p => p.m), pages[0].m);
-      st.set(''); res.innerHTML = '';
-      res.append(resultBox(fmtSize(out.length), () => download(out, baseName(file.name) + '_cropped.pdf')));
+      let out = await cropPdf(bytes, same.checked ? [] : pages.map(p => ({ ...p.m })), { ...pages[0].m });
+      if (secure.checked) {
+        st.set('กำลังลบข้อมูลนอกกรอบ...'); st.progress(0);
+        out = await rasterizePdf(out, { dpi: 200, q: 0.88 }, p => st.progress(p));
+        st.progress(null);
+      }
+      st.set('');
+      if (my !== gen) return;
+      res.innerHTML = '';
+      res.append(resultBox(fmtSize(out.length) + (secure.checked ? ' · ลบข้อมูลนอกกรอบแล้ว' : ''), () => download(out, name)));
     } catch (e) { st.error(e); }
   }
 }

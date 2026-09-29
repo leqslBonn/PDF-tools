@@ -1,4 +1,4 @@
-import { h, dropzone, readBytes, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, seg, field, textToPng, pageGeom, drawVisual, loadPdfJs, renderPage, imageToCanvas, canvasToBytes, pickFiles } from '../lib.js';
+import { h, dropzone, readPdf, busy, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, seg, field, textToPng, pageGeom, drawVisual, loadPdfJs, renderPage, imageToCanvas, canvasToBytes, pickFiles } from '../lib.js';
 
 /**
  * o: { kind:'text'|'image', text, size, color, bold, imageBytes(png), imageScale (0-1 of page width),
@@ -37,7 +37,7 @@ export async function addWatermark(bytes, o) {
 }
 
 export default function (root) {
-  let file, bytes, previewSrc;
+  let file, bytes, previewSrc, gen = 0;
   const o = { kind: 'text', text: 'ลับเฉพาะ', size: 60, color: '#ff0000', bold: true, opacity: 0.25, angle: 45, layout: 'center', pos: 'c', imageBytes: null, imageScale: 0.5 };
   const st = statusBar();
   const res = h('div');
@@ -80,23 +80,26 @@ export default function (root) {
         h('div', { class: 'row' }, field('องศาการเอียง', range('angle', -90, 90, 5, v => v + '°'))),
         h('div', { class: 'row' }, field('รูปแบบ', seg([['center', 'วางจุดเดียว'], ['tile', 'ปูเต็มหน้า']], o.layout, v => { o.layout = v; posSel.disabled = v === 'tile'; refresh(); }))),
         h('div', { class: 'row' }, field('ตำแหน่ง', posSel)),
-        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: run }, 'ใส่ลายน้ำ')),
+        h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: busy(run) }, 'ใส่ลายน้ำ')),
         st, res)));
   const dz = dropzone({ accept: '.pdf', onFiles: load });
   root.append(dz, panel);
 
-  function reset() { file = null; res.innerHTML = ''; panel.classList.add('hidden'); dz.classList.remove('hidden'); }
+  function reset() { gen++; file = bytes = previewSrc = null; res.innerHTML = ''; preview.innerHTML = ''; st.set(''); panel.classList.add('hidden'); dz.classList.remove('hidden'); }
   async function load([f]) {
-    file = f; bytes = await readBytes(f);
+    st.set('กำลังอ่านไฟล์...');
     try {
+      const r = await readPdf(f);
+      file = f; bytes = r.bytes;
       const src = await PL().PDFDocument.load(bytes);
       const tmp = await PL().PDFDocument.create();
       const [p] = await tmp.copyPages(src, [0]); tmp.addPage(p);
       previewSrc = await tmp.save();
     } catch (e) { return st.error(e); }
+    st.set('');
     dz.classList.add('hidden'); panel.classList.remove('hidden'); refresh(); }
   let timer, previewSeq = 0;
-  function refresh() { res.innerHTML = ''; clearTimeout(timer); timer = setTimeout(drawPreview, 250); }
+  function refresh() { gen++; res.innerHTML = ''; clearTimeout(timer); timer = setTimeout(drawPreview, 250); }
   async function drawPreview() {
     if (!bytes) return;
     if (o.kind === 'image' && !o.imageBytes) return;
@@ -114,11 +117,14 @@ export default function (root) {
   }
   async function run() {
     if (o.kind === 'image' && !o.imageBytes) return st.set('กรุณาเลือกรูปภาพ', 'err');
+    const my = gen, name = baseName(file.name) + '_watermark.pdf';
     try {
       st.set('กำลังใส่ลายน้ำ...');
-      const out = await addWatermark(bytes, o);
-      st.set(''); res.innerHTML = '';
-      res.append(resultBox(fmtSize(out.length), () => download(out, baseName(file.name) + '_watermark.pdf')));
+      const out = await addWatermark(bytes, { ...o });
+      st.set('');
+      if (my !== gen) return;
+      res.innerHTML = '';
+      res.append(resultBox(fmtSize(out.length), () => download(out, name)));
     } catch (e) { st.error(e); }
   }
 }

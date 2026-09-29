@@ -12,6 +12,8 @@ export function h(tag, attrs = {}, ...kids) {
     else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
     else el.setAttribute(k, v === true ? '' : v);
   }
+  // Icon-only buttons: expose their tooltip to screen readers too.
+  if (attrs && attrs.title && !attrs['aria-label'] && (tag === 'button' || tag === 'a')) el.setAttribute('aria-label', attrs.title);
   for (const k of kids.flat()) if (k != null && k !== false) el.append(k.nodeType ? k : String(k));
   return el;
 }
@@ -25,6 +27,28 @@ export function toast(msg, ms = 2500) {
 export const fmtSize = (n) => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(2)} MB`;
 export const baseName = (name) => name.replace(/\.[^.]+$/, '');
 export const tick = () => new Promise(r => setTimeout(r, 0));
+
+/* ---------------- page lifecycle ----------------
+ * Tools register cleanups (camera streams, observers, listeners) that run when the
+ * user navigates away, and can flag unsaved work so the router asks before leaving. */
+const leaveFns = [];
+export const onLeave = (fn) => { leaveFns.push(fn); };
+export function runLeave() {
+  while (leaveFns.length) { try { leaveFns.pop()(); } catch (e) { console.warn(e); } }
+  document.querySelectorAll('.modal-bg, .cam, .flash').forEach(el => el.remove());
+  unsaved.value = false;
+}
+export const unsaved = { value: false };
+
+/** Wrap a button handler: disables the button (with spinner) until the async work ends. */
+export function busy(fn) {
+  return async (e) => {
+    const b = e && e.currentTarget;
+    if (b && b.disabled) return;
+    if (b) { b.disabled = true; b.classList.add('busy'); b.setAttribute('aria-busy', 'true'); }
+    try { await fn(e); } finally { if (b) { b.disabled = false; b.classList.remove('busy'); b.removeAttribute('aria-busy'); } }
+  };
+}
 
 /** Segmented control. opts: [[value,label],...] */
 export function seg(opts, value, onChange) {
@@ -63,7 +87,7 @@ export function dropzone(opts) {
   const isImg = opts.accept === 'image';
   const accept = isImg ? 'image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp' : 'application/pdf,.pdf';
   const input = h('input', { type: 'file', accept, multiple: opts.multiple || false, class: 'hidden' });
-  const box = h('div', { class: 'drop', tabindex: 0 },
+  const box = h('div', { class: 'drop', tabindex: 0, role: 'button', 'aria-label': isImg ? 'เลือกไฟล์รูปภาพ' : 'เลือกไฟล์ PDF' },
     h('div', { html: ICON_UP }),
     h('div', { class: 'big' }, opts.title || (isImg ? 'ลากไฟล์รูปภาพมาวาง หรือคลิกเพื่อเลือก' : 'ลากไฟล์ PDF มาวาง หรือคลิกเพื่อเลือก')),
     h('div', { class: 'small' }, opts.hint || (opts.multiple ? 'เลือกได้หลายไฟล์พร้อมกัน' : `ไฟล์ละไม่เกิน ${MAX_MB} MB`)),
@@ -82,7 +106,7 @@ export function dropzone(opts) {
     if (files.length) opts.onFiles(files);
   };
   box.onclick = () => input.click();
-  box.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') input.click(); };
+  box.onkeydown = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } };
   input.onchange = () => { take(input.files); input.value = ''; };
   box.ondragover = (e) => { e.preventDefault(); box.classList.add('over'); };
   box.ondragleave = () => box.classList.remove('over');
@@ -107,6 +131,61 @@ export function pickFiles(accept, multiple = true) {
 
 export const readBytes = async (file) => new Uint8Array(await file.arrayBuffer());
 
+/** Small modal asking for a PDF password. Resolves to the string, or null if cancelled. */
+function askPassword(name, wrong) {
+  return new Promise(res => {
+    const input = h('input', { type: 'password', autocomplete: 'off', placeholder: 'รหัสผ่านของไฟล์', 'aria-label': 'รหัสผ่านของไฟล์' });
+    const bg = h('div', { class: 'modal-bg' });
+    const done = (v) => { bg.remove(); res(v); };
+    const form = h('form', { class: 'modal', style: 'width:min(420px,100%)' },
+      h('h3', {}, '🔐 ไฟล์นี้มีรหัสผ่าน'),
+      h('p', { style: 'margin:0 0 10px;color:var(--muted);font-size:14px;word-break:break-all' }, name),
+      wrong ? h('div', { class: 'status err', style: 'margin-bottom:8px' }, 'รหัสผ่านไม่ถูกต้อง ลองใหม่อีกครั้ง') : null,
+      input,
+      h('div', { class: 'actions' }, h('div', { class: 'spacer' }),
+        h('button', { type: 'button', class: 'btn', onclick: () => done(null) }, 'ยกเลิก'),
+        h('button', { type: 'submit', class: 'btn primary' }, 'ปลดล็อก')));
+    form.onsubmit = (e) => { e.preventDefault(); done(input.value); };
+    bg.append(form);
+    document.body.append(bg);
+    input.focus();
+  });
+}
+
+/**
+ * Read a PDF file and make sure pdf-lib can edit it.
+ * Encrypted files are decrypted in memory (owner-password-only files silently; files that
+ * need a password to open ask the user) and returned as plain, unencrypted bytes.
+ * Returns { bytes, unlocked, hasForm, pages }.
+ */
+export async function readPdf(file) {
+  const raw = await readBytes(file);
+  const { PDFDocument } = PL();
+  let doc, unlocked = false;
+  try {
+    doc = await PDFDocument.load(raw, { updateMetadata: false });
+  } catch (e) {
+    if (!/encrypted/i.test(e.message)) throw e;
+    try { doc = await PDFDocument.load(raw, { password: '', updateMetadata: false }); }
+    catch (e2) {
+      let wrong = false;
+      for (;;) {
+        const pw = await askPassword(file.name, wrong);
+        if (pw == null) throw new Error('ต้องใส่รหัสผ่านเพื่อเปิดไฟล์ ' + file.name);
+        try { doc = await PDFDocument.load(raw, { password: pw, updateMetadata: false }); break; }
+        catch { wrong = true; }
+      }
+    }
+    unlocked = true;
+  }
+  const pages = doc.getPageCount();
+  if (!pages) throw new Error('ไฟล์ ' + file.name + ' ไม่มีหน้าเอกสาร');
+  let hasForm = false;
+  try { hasForm = doc.getForm().getFields().length > 0; } catch { /* malformed AcroForm */ }
+  const bytes = unlocked ? await doc.save({ useObjectStreams: false }) : raw;
+  return { bytes, unlocked, hasForm, pages };
+}
+
 /* ---------------- status / progress ---------------- */
 export function statusBar() {
   const bar = h('div', { class: 'progress' }, h('div'));
@@ -123,7 +202,9 @@ export function statusBar() {
 
 export function friendlyError(e) {
   const m = String(e && (e.message || e));
-  if (/encrypt|password/i.test(m)) return 'ไฟล์นี้ถูกเข้ารหัส/ใส่รหัสผ่านไว้ กรุณาปลดรหัสก่อน';
+  if (/ต้องใส่รหัสผ่าน|ไม่มีหน้า/.test(m)) return m;
+  if (/encrypt|password/i.test(m)) return 'ไฟล์นี้ถูกเข้ารหัสไว้และปลดล็อกไม่ได้';
+  if (/null is not an object|getContext|out of memory|allocation/i.test(m)) return 'ไฟล์/รูปใหญ่เกินกว่าที่เครื่องนี้จะประมวลผลได้ ลองลดความละเอียดหรือใช้ไฟล์ที่เล็กลง';
   if (/Invalid PDF|No PDF header|Failed to parse/i.test(m)) return 'ไฟล์ PDF เสียหรือไม่ใช่ PDF';
   return m;
 }
@@ -176,7 +257,8 @@ export async function renderPage(pdf, n, { maxW = 260, maxH = 360, scale, rotate
   const page = await pdf.getPage(n);
   const rot = (page.rotate + rotate) % 360;
   const base = page.getViewport({ scale: 1, rotation: rot });
-  const s = scale || Math.min(maxW / base.width, maxH / base.height) * (window.devicePixelRatio || 1);
+  // DPR capped at 2: sharper beyond that isn't visible but costs a lot of memory on phones.
+  const s = scale || Math.min(maxW / base.width, maxH / base.height) * Math.min(2, window.devicePixelRatio || 1);
   const vp = page.getViewport({ scale: s, rotation: rot });
   const c = document.createElement('canvas');
   c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
@@ -219,16 +301,40 @@ export async function canvasToBytes(c, type = 'image/png', q) {
 /**
  * Load an image file (EXIF orientation applied) into a canvas, optionally downscaled.
  */
+export const MAX_CANVAS_PX = 16000000; // iOS Safari refuses larger canvases
+
+async function decodeImage(blob) {
+  try { return await createImageBitmap(blob, { imageOrientation: 'from-image' }); }
+  catch {
+    // Older Safari: no options support → decode via <img> (which applies EXIF itself).
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return img;
+    } finally { URL.revokeObjectURL(url); }
+  }
+}
+
 export async function imageToCanvas(src, maxDim = 0) {
-  const bmp = await createImageBitmap(src instanceof Blob ? src : new Blob([src]), { imageOrientation: 'from-image' });
-  let w = bmp.width, hh = bmp.height;
-  if (maxDim && Math.max(w, hh) > maxDim) { const k = maxDim / Math.max(w, hh); w = Math.round(w * k); hh = Math.round(hh * k); }
+  const bmp = await decodeImage(src instanceof Blob ? src : new Blob([src]));
+  let w = bmp.naturalWidth || bmp.width, hh = bmp.naturalHeight || bmp.height;
+  let k = 1;
+  if (maxDim && Math.max(w, hh) > maxDim) k = maxDim / Math.max(w, hh);
+  if (w * hh * k * k > MAX_CANVAS_PX) k = Math.sqrt(MAX_CANVAS_PX / (w * hh));
+  w = Math.max(1, Math.floor(w * k)); hh = Math.max(1, Math.floor(hh * k));
   const c = document.createElement('canvas');
   c.width = w; c.height = hh;
-  c.getContext('2d').drawImage(bmp, 0, 0, w, hh);
+  const ctx = c.getContext('2d');
+  if (!ctx) throw new Error('out of memory');
+  ctx.drawImage(bmp, 0, 0, w, hh);
   bmp.close && bmp.close();
   return c;
 }
+
+/** Release a canvas's pixel memory right away (Safari keeps it until GC otherwise). */
+export const freeCanvas = (c) => { if (c) { c.width = 0; c.height = 0; } };
 
 /** Copy onto an opaque white background (JPEG has no alpha; transparent would turn black). */
 export function flattenWhite(src) {
@@ -324,6 +430,50 @@ export function drawVisual(page, img, { cu, cv, w, h, angle = 0, opacity = 1 }) 
   const x = c.x - (cos * w / 2 - sin * h / 2);
   const y = c.y - (sin * w / 2 + cos * h / 2);
   page.drawImage(img, { x, y, width: w, height: h, rotate: PL().degrees(rot + angle), opacity });
+}
+
+/**
+ * copyPages() drops the document-level AcroForm, which makes fill-in fields dead.
+ * This re-links the copied pages' widgets into the output's AcroForm so forms stay fillable.
+ */
+export function copyForms(src, out, copiedPages) {
+  const { PDFName, PDFDict, PDFArray, PDFRef, PDFObjectCopier } = PL();
+  const srcAF = src.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  if (!srcAF) return 0;
+  const ctx = out.context;
+  let af = out.catalog.lookupMaybe(PDFName.of('AcroForm'), PDFDict);
+  if (!af) {
+    af = ctx.obj({ Fields: [] });
+    const copier = PDFObjectCopier.for(src.context, ctx);
+    for (const k of ['DA', 'DR', 'NeedAppearances', 'Q']) {
+      const v = srcAF.get(PDFName.of(k));
+      if (v) af.set(PDFName.of(k), copier.copy(v));
+    }
+    out.catalog.set(PDFName.of('AcroForm'), ctx.register(af));
+  }
+  const fields = af.lookup(PDFName.of('Fields'), PDFArray);
+  const seen = new Set(fields.asArray().map(r => r.toString()));
+  let n = 0;
+  for (const p of copiedPages) {
+    const annots = p.node.Annots();
+    if (!annots) continue;
+    for (let i = 0; i < annots.size(); i++) {
+      let ref = annots.get(i);
+      let d = ctx.lookup(ref);
+      if (!(d instanceof PDFDict) || d.get(PDFName.of('Subtype')) !== PDFName.of('Widget')) continue;
+      while (d.get(PDFName.of('Parent'))) { ref = d.get(PDFName.of('Parent')); d = ctx.lookup(ref, PDFDict); }
+      if (ref instanceof PDFRef && !seen.has(ref.toString())) { seen.add(ref.toString()); fields.push(ref); n++; }
+    }
+  }
+  return n;
+}
+
+/** Copy pages (by 0-based index) from src into out, keeping form fields working. */
+export async function copyInto(out, src, indices) {
+  const pages = await out.copyPages(src, indices);
+  pages.forEach(p => out.addPage(p));
+  try { copyForms(src, out, pages); } catch (e) { console.warn('form copy skipped', e); }
+  return pages;
 }
 
 /** Save with object streams for smaller output. */

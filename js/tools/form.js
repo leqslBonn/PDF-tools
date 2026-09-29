@@ -1,11 +1,11 @@
-import { h, dropzone, readBytes, statusBar, download, resultBox, fmtSize, baseName, field, textToPng, imageToCanvas, canvasToBytes, pickFiles, toThaiDigits } from '../lib.js';
+import { h, dropzone, readPdf, busy, statusBar, download, resultBox, fmtSize, baseName, field, textToPng, imageToCanvas, canvasToBytes, pickFiles, toThaiDigits } from '../lib.js';
 import { createEditor, stampItems } from '../editor.js';
 
 const SYMBOLS = ['✓', '✔', '✗', '✘', '●', '○', '■', '□', '☑', '☒', '★', '→', '←', '•', '—', '※'];
 const FONTS = ['Sarabun', 'Itim', 'Mali', 'Charm'];
 
 export default function (root) {
-  let file, bytes, pageW = 595;
+  let file, bytes, gen = 0;
   const st = statusBar();
   const res = h('div');
   const edHost = h('div');
@@ -13,6 +13,7 @@ export default function (root) {
   // text defaults (also used to edit the selected text item)
   const tIn = h('textarea', { rows: 2, placeholder: 'พิมพ์ข้อความ (Enter ขึ้นบรรทัดใหม่)' });
   const size = h('input', { type: 'number', min: 6, max: 96, value: 14 });
+  size.onblur = () => { size.value = clampSize(size.value, 14); };
   const color = h('input', { type: 'color', value: '#000000' });
   const bold = h('input', { type: 'checkbox' });
   const font = h('select', {}, ...FONTS.map(f => h('option', { value: f }, f)));
@@ -29,24 +30,25 @@ export default function (root) {
       h('button', { class: 'btn sm', onclick: () => { tIn.value = toThaiDigits(todayThai()); addText(); } }, '+ วันที่ (เลขไทย)')),
     selBox,
     h('h3', { style: 'margin-top:18px' }, 'สัญลักษณ์'),
-    h('div', { class: 'sym-grid' }, ...SYMBOLS.map(s => h('button', { type: 'button', title: s, onclick: () => addSymbol(s) }, s))),
+    h('div', { class: 'sym-grid' }, ...SYMBOLS.map(s => h('button', { type: 'button', title: 'เพิ่มสัญลักษณ์ ' + s, onclick: () => addSymbol(s) }, s))),
     h('h3', { style: 'margin-top:18px' }, 'รูปภาพ'),
     h('button', { class: 'btn', style: 'width:100%', onclick: addImage }, '🖼 เพิ่มรูปภาพ / โลโก้ / ตราประทับ'),
     h('hr', { style: 'border-color:var(--line);margin:16px 0' }),
     h('div', { class: 'sub', style: 'font-size:13px;color:var(--muted)' }, 'คลิกหน้าที่ต้องการก่อน แล้วค่อยเพิ่ม · ลากเพื่อย้าย · ลากจุดมุมเพื่อปรับขนาด · ดับเบิลคลิกข้อความเพื่อแก้ไข'),
-    h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: run }, 'บันทึก PDF')),
+    h('div', { class: 'actions' }, h('button', { class: 'btn', onclick: reset }, 'ไฟล์ใหม่'), h('div', { class: 'spacer' }), h('button', { class: 'btn primary', onclick: busy(run) }, 'บันทึก PDF')),
     st, res);
   const panel = h('div', { class: 'hidden' }, h('div', { class: 'editor-layout' }, edHost, side));
   const dz = dropzone({ accept: '.pdf', hint: 'เลือกเอกสารที่ต้องการเพิ่มข้อมูล', onFiles: load });
   root.append(dz, panel);
-  const ed = createEditor(edHost, { onSelect: showSel, onEdit: editText });
+  const ed = createEditor(edHost, { onSelect: showSel, onEdit: editText, onChange: () => { gen++; res.innerHTML = ''; } });
 
   function todayThai() {
     const d = new Date();
     const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
     return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear() + 543}`;
   }
-  const props = () => ({ size: +size.value || 14, color: color.value, bold: bold.checked, font: font.value });
+  const clampSize = (v, fallback) => { const n = +v; return isNaN(n) || !n ? fallback : Math.min(96, Math.max(6, n)); };
+  const props = () => ({ size: clampSize(size.value, 14), color: color.value, bold: bold.checked, font: font.value });
 
   async function render(text, p) {
     const t = await textToPng(text, { ...p, pad: 0.1 });
@@ -64,7 +66,7 @@ export default function (root) {
   }
   async function addSymbol(s) {
     if (!bytes) return;
-    const p = { ...props(), size: Math.max(14, +size.value || 14), font: 'Sarabun' };
+    const p = { ...props(), size: Math.max(14, clampSize(size.value, 14)), font: 'Sarabun' };
     const r = await render(s, p);
     ed.add({ ...r, kind: 'text', text: s, props: p }, { widthFrac: r.pts / pageWidthPts() });
   }
@@ -78,8 +80,8 @@ export default function (root) {
     const b = await canvasToBytes(c, isPng ? 'image/png' : 'image/jpeg', 0.9);
     ed.add({ kind: 'image', src: c.toDataURL(isPng ? 'image/png' : 'image/jpeg', 0.8), bytes: b, type, aspect: c.width / c.height, keepAspect: true }, { widthFrac: 0.3 });
   }
-  // A4 width ≈ 595pt; we only need a rough scale so new text appears at its real size.
-  function pageWidthPts() { return pageW; }
+  // Width (pt) of the page the item goes on, so new text appears at its real point size on every page.
+  function pageWidthPts() { return ed.pagePts(ed.current()); }
 
   function showSel(it) {
     res.innerHTML = '';
@@ -87,13 +89,14 @@ export default function (root) {
     selBox.classList.toggle('hidden', !it || it.kind !== 'text');
     if (!it || it.kind !== 'text') return;
     const ta = h('textarea', { rows: 2 }); ta.value = it.text;
-    const sz = h('input', { type: 'number', min: 6, max: 96, value: it.props.size });
+    const sz = h('input', { type: 'number', min: 6, max: 96, value: it.props.size, 'aria-label': 'ขนาดตัวอักษร' });
     const col = h('input', { type: 'color', value: it.props.color });
     const bd = h('input', { type: 'checkbox', checked: it.props.bold });
     const apply = async () => {
       const oldSize = it.props.size;
       it.text = ta.value || ' ';
-      it.props = { ...it.props, size: +sz.value || oldSize, color: col.value, bold: bd.checked };
+      it.props = { ...it.props, size: clampSize(sz.value, oldSize), color: col.value, bold: bd.checked };
+      sz.value = it.props.size;
       const r = await render(it.text, it.props);
       // keep rendered scale proportional to the font size change
       it.h = it.h * (it.props.size / oldSize);
@@ -106,26 +109,32 @@ export default function (root) {
   }
   function editText(it) { if (it.kind === 'text') { showSel(it); selBox.querySelector('textarea').focus(); } }
 
-  function reset() { file = bytes = null; ed.clear(); res.innerHTML = ''; panel.classList.add('hidden'); dz.classList.remove('hidden'); }
+  function reset() {
+    if (ed.items().length && !confirm('ข้อมูลที่เพิ่มไว้จะหายไป ต้องการเลือกไฟล์ใหม่หรือไม่?')) return;
+    gen++; file = bytes = null; ed.destroy(); tIn.value = ''; selBox.innerHTML = ''; selBox.classList.add('hidden');
+    res.innerHTML = ''; st.set(''); panel.classList.add('hidden'); dz.classList.remove('hidden');
+  }
   async function load([f]) {
-    file = f; bytes = await readBytes(f);
-    dz.classList.add('hidden'); panel.classList.remove('hidden');
-    st.set('กำลังแสดงเอกสาร...');
+    st.set('กำลังอ่านไฟล์...');
     try {
-      const doc = await window.PDFLib.PDFDocument.load(bytes);
-      const p = doc.getPage(0); const r = p.getRotation().angle % 180;
-      pageW = r ? p.getCropBox().height : p.getCropBox().width;
-      await ed.load(bytes); st.set('');
+      const r = await readPdf(f);
+      file = f; bytes = r.bytes; gen++;
+      dz.classList.add('hidden'); panel.classList.remove('hidden');
+      st.set('กำลังแสดงเอกสาร...');
+      await ed.load(bytes);
+      st.set(r.unlocked ? '🔓 ปลดล็อกไฟล์แล้ว' : '');
     } catch (e) { st.error(e); }
   }
   async function run() {
     res.innerHTML = '';
     if (!ed.items().length) return st.set('ยังไม่ได้เพิ่มข้อมูล', 'err');
+    const my = gen, name = baseName(file.name) + '_filled.pdf';
     try {
       st.set('กำลังบันทึก...');
       const out = await stampItems(bytes, ed.items());
       st.set('');
-      res.append(resultBox(fmtSize(out.length), () => download(out, baseName(file.name) + '_filled.pdf')));
+      if (my !== gen) return;
+      res.append(resultBox(fmtSize(out.length), () => { download(out, name); ed.saved(); }));
     } catch (e) { st.error(e); }
   }
 }

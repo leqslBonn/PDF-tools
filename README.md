@@ -36,6 +36,8 @@ python -m http.server 8765
 ## ไลบรารี (อยู่ใน `vendor/`, ใช้แบบ offline ได้)
 
 pdf-lib (@cantoo fork, รองรับเข้ารหัส) · pdf.js 3.11 · JSZip · SortableJS · pako
-ฟอนต์ไทยโหลดจาก Google Fonts (Sarabun, Charm, Mali, Itim, Srisakdi) — ถ้าออฟไลน์จะใช้ฟอนต์ของระบบแทน
+ฟอนต์ไทย (Kanit, IBM Plex Sans Thai, Sarabun, Charm, Mali, Itim, Srisakdi) เก็บไว้ใน `vendor/fonts/` + `css/fonts.css` — ไม่เรียก Google หรือบริการภายนอกเลย และเปิดหน้าเว็บครั้งเดียวแล้วใช้ออฟไลน์ได้ทุกเครื่องมือ (modulepreload)
+
+ไฟล์ PDF ที่ติดรหัส: ถ้าเป็นรหัสเจ้าของ (เปิดอ่านได้แต่ห้ามแก้) จะปลดให้อัตโนมัติ ถ้าต้องใส่รหัสเพื่อเปิด จะถามรหัสก่อน
 
 ข้อความภาษาไทยทุกจุด (เลขหน้า ลายน้ำ ข้อความในฟอร์ม) วาดผ่าน canvas แล้วฝังเป็นภาพ PNG ความละเอียด 4 เท่า เพื่อให้สระ/วรรณยุกต์ถูกต้องเสมอ

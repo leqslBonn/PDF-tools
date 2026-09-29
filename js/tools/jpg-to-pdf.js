@@ -1,92 +1,115 @@
-import { h, dropzone, statusBar, download, resultBox, PL, savePdf, fmtSize, seg, field, imageToCanvas, canvasToBytes, pickFiles, flattenWhite } from '../lib.js';
+import { h, dropzone, statusBar, download, resultBox, PL, savePdf, fmtSize, seg, field, imageToCanvas, canvasToBytes, pickFiles, flattenWhite, freeCanvas, busy, tick } from '../lib.js';
+import { rotateCanvas } from '../scan-core.js';
 
 export const PAGE_SIZES = { a4: [595.28, 841.89], letter: [612, 792], legal: [612, 1008] };
 
 /**
- * images: [{ canvas }]  (already EXIF-normalised)
- * opts: { size: 'a4'|'letter'|'legal'|'fit', orient: 'auto'|'portrait'|'landscape', margin: pt, quality }
+ * images: [{ canvas } | { getCanvas: async () => canvas }]  (EXIF-normalised)
+ * Canvases produced by getCanvas are built one at a time and freed right after embedding,
+ * so memory stays flat no matter how many pages there are.
+ * opts: { size: 'a4'|'letter'|'legal'|'fit', orient: 'auto'|'portrait'|'landscape', margin: pt, quality, onProgress }
  */
-export async function imagesToPdf(images, { size = 'a4', orient = 'auto', margin = 0, quality = 0.9 } = {}) {
+export async function imagesToPdf(images, { size = 'a4', orient = 'auto', margin = 0, quality = 0.9, onProgress } = {}) {
   const doc = await PL().PDFDocument.create();
-  for (const im of images) {
-    const c = flattenWhite(im.canvas);
+  for (let i = 0; i < images.length; i++) {
+    const im = images[i];
+    const src = im.canvas || await im.getCanvas();
+    const c = flattenWhite(src);
+    if (!im.canvas) freeCanvas(src);
     const jpg = await doc.embedJpg(await canvasToBytes(c, 'image/jpeg', quality));
+    const cw = c.width, ch = c.height;
+    freeCanvas(c);
     // 1 px = 0.75 pt at 96dpi; for "fit" we map image pixels to points so the page matches the photo.
     let pw, ph;
-    if (size === 'fit') { pw = c.width * 0.75 + margin * 2; ph = c.height * 0.75 + margin * 2; }
+    if (size === 'fit') { pw = cw * 0.75 + margin * 2; ph = ch * 0.75 + margin * 2; }
     else {
       [pw, ph] = PAGE_SIZES[size];
-      const land = orient === 'landscape' || (orient === 'auto' && c.width > c.height);
+      const land = orient === 'landscape' || (orient === 'auto' && cw > ch);
       if (land) [pw, ph] = [ph, pw];
     }
     const page = doc.addPage([pw, ph]);
     const aw = pw - margin * 2, ah = ph - margin * 2;
-    const k = Math.min(aw / c.width, ah / c.height);
-    const w = c.width * k, hh = c.height * k;
+    const k = Math.min(aw / cw, ah / ch);
+    const w = cw * k, hh = ch * k;
     page.drawImage(jpg, { x: (pw - w) / 2, y: (ph - hh) / 2, width: w, height: hh });
+    onProgress && onProgress((i + 1) / images.length);
+    await tick();
   }
   return savePdf(doc);
 }
 
+/** Small preview (data URL) of an image file, rotated. */
+async function thumbOf(file, rot) {
+  const c = rotateCanvas(await imageToCanvas(file, 320), rot);
+  const url = c.toDataURL('image/jpeg', 0.7);
+  freeCanvas(c);
+  return url;
+}
+
 export default function (root) {
-  let items = []; // {file, canvas, url}
-  let size = 'a4', orient = 'auto', margin = 0;
+  let items = []; // {file, rot, thumb}
+  let size = 'a4', orient = 'auto', margin = 0, gen = 0, lastEnd = 0;
   const list = h('div', { class: 'pages' });
   const st = statusBar();
   const res = h('div');
+  const stale = () => { gen++; res.innerHTML = ''; };
   const panel = h('div', { class: 'panel hidden' },
     h('div', { class: 'row' },
-      field('ขนาดหน้า', seg([['a4', 'A4'], ['letter', 'Letter'], ['legal', 'Legal'], ['fit', 'ตามขนาดรูป']], size, v => size = v)),
-      field('แนวกระดาษ', seg([['auto', 'อัตโนมัติ'], ['portrait', 'แนวตั้ง'], ['landscape', 'แนวนอน']], orient, v => orient = v)),
-      field('ขอบกระดาษ', seg([[0, 'ไม่มี'], [18, 'แคบ'], [40, 'กว้าง']], margin, v => margin = v)),
+      field('ขนาดหน้า', seg([['a4', 'A4'], ['letter', 'Letter'], ['legal', 'Legal'], ['fit', 'ตามขนาดรูป']], size, v => { size = v; stale(); })),
+      field('แนวกระดาษ', seg([['auto', 'อัตโนมัติ'], ['portrait', 'แนวตั้ง'], ['landscape', 'แนวนอน']], orient, v => { orient = v; stale(); })),
+      field('ขอบกระดาษ', seg([[0, 'ไม่มี'], [18, 'แคบ'], [40, 'กว้าง']], margin, v => { margin = v; stale(); })),
     ),
     h('h3', { style: 'margin-top:16px' }, 'ลำดับหน้า (ลากเพื่อสลับ)'),
     list,
     h('div', { class: 'actions' },
       h('button', { class: 'btn', onclick: async () => add(await pickFiles('image/jpeg,image/png,image/webp')) }, '+ เพิ่มรูป'),
       h('div', { class: 'spacer' }),
-      h('button', { class: 'btn primary', onclick: run }, 'สร้าง PDF')),
+      h('button', { class: 'btn primary', onclick: busy(run) }, 'สร้าง PDF')),
     st, res);
   const dz = dropzone({ accept: 'image', multiple: true, hint: 'รับ .jpg และ .png — เลือกได้หลายไฟล์ จะเรียงเป็นหน้าตามลำดับ', onFiles: add });
   root.append(dz, panel);
-  new Sortable(list, { animation: 150, filter: '.btn', delay: 120, delayOnTouchOnly: true,
-    onEnd: (e) => { const [m] = items.splice(e.oldIndex, 1); items.splice(e.newIndex, 0, m); draw(); } });
+  // preventOnFilter:false — otherwise iOS Safari swallows taps on the tile buttons.
+  new Sortable(list, { animation: 150, filter: '.btn', preventOnFilter: false, delay: 120, delayOnTouchOnly: true,
+    onEnd: (e) => { lastEnd = Date.now(); const [m] = items.splice(e.oldIndex, 1); items.splice(e.newIndex, 0, m); draw(); } });
 
   async function add(files) {
-    st.set('กำลังโหลดรูป...');
-    for (const file of files) {
-      try { const canvas = await imageToCanvas(file, 3000); items.push({ file, canvas, rot: 0 }); }
-      catch { st.set(`อ่านรูปไม่ได้: ${file.name}`, 'err'); }
+    const bad = [];
+    for (let i = 0; i < files.length; i++) {
+      st.set(`กำลังโหลดรูป ${i + 1}/${files.length}...`);
+      try { items.push({ file: files[i], rot: 0, thumb: await thumbOf(files[i], 0) }); }
+      catch { bad.push(files[i].name); }
     }
-    st.set(''); draw();
+    st.set(bad.length ? `อ่านรูปไม่ได้: ${bad.join(', ')}` : '', bad.length ? 'err' : '');
+    draw();
   }
-  function rotate(it) {
-    const c = document.createElement('canvas');
-    c.width = it.canvas.height; c.height = it.canvas.width;
-    const ctx = c.getContext('2d');
-    ctx.translate(c.width, 0); ctx.rotate(Math.PI / 2); ctx.drawImage(it.canvas, 0, 0);
-    it.canvas = c; draw();
+  async function rotate(it) {
+    if (Date.now() - lastEnd < 300) return;
+    it.rot = (it.rot + 90) % 360;
+    it.thumb = await thumbOf(it.file, it.rot);
+    draw();
   }
   function draw() {
-    res.innerHTML = '';
+    stale();
     panel.classList.toggle('hidden', !items.length);
     list.innerHTML = '';
     items.forEach((it, i) => {
-      const img = h('img', { src: it.canvas.toDataURL('image/jpeg', 0.6) });
-      list.append(h('div', { class: 'pg' }, h('div', { class: 'cv' }, img), h('div', { class: 'num' }, `หน้า ${i + 1}`),
+      list.append(h('div', { class: 'pg' }, h('div', { class: 'cv' }, h('img', { src: it.thumb, alt: `หน้า ${i + 1}` })), h('div', { class: 'num' }, `หน้า ${i + 1}`),
         h('div', { class: 'tools' },
-          h('button', { class: 'btn sm icon', title: 'หมุน', onclick: () => rotate(it) }, '⟳'),
-          h('button', { class: 'btn sm icon danger', title: 'ลบ', onclick: () => { items.splice(i, 1); draw(); } }, '✕'))));
+          h('button', { class: 'btn sm icon', title: 'หมุน 90°', onclick: () => rotate(it) }, '⟳'),
+          h('button', { class: 'btn sm icon danger', title: 'ลบรูปนี้', onclick: () => { items.splice(i, 1); draw(); } }, '✕'))));
     });
   }
   async function run() {
     res.innerHTML = '';
     if (!items.length) return;
+    const my = gen, snapshot = items.slice();
     try {
-      st.set('กำลังสร้าง PDF...'); st.progress(0.5);
-      const out = await imagesToPdf(items, { size, orient, margin: +margin });
+      st.set('กำลังสร้าง PDF...'); st.progress(0);
+      const out = await imagesToPdf(snapshot.map(it => ({ getCanvas: async () => rotateCanvas(await imageToCanvas(it.file, 3000), it.rot) })),
+        { size, orient, margin: +margin, onProgress: p => st.progress(p) });
       st.progress(null); st.set('');
-      res.append(resultBox(`${items.length} หน้า · ${fmtSize(out.length)}`, () => download(out, 'images.pdf')));
+      if (my !== gen) return;
+      res.append(resultBox(`${snapshot.length} หน้า · ${fmtSize(out.length)}`, () => download(out, 'images.pdf')));
     } catch (e) { st.error(e); }
   }
 }

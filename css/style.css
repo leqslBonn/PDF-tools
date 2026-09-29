@@ -774,3 +774,28 @@ footer .heart { color: var(--accent2); }
   0% { opacity: 1; transform: translate(0, 0) rotate(0); }
   100% { opacity: 0; transform: translate(var(--x, 60px), var(--y, -40px)) rotate(var(--r, 320deg)); }
 }
+
+/* ---------- audit fixes: hit areas, focus, busy state ---------- */
+/* Invisible 44px touch targets around small handles (visual size unchanged). */
+.item .rs::before, .item .del::before, .cropbox .h::before, .corner-stage .hdl::before, .saved-sigs .del::before {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%);
+}
+.item .del, .saved-sigs .del { position: absolute; }
+/* Inputs lose the default outline, so give keyboard users a clear ring. */
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 1px;
+}
+.item:focus-visible, .cropbox:focus-visible, .pg:focus-visible, .drop:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 3px;
+}
+/* Primary button while working: spinner + no double-submit. */
+.btn.busy { position: relative; color: transparent !important; pointer-events: none; }
+.btn.busy::after {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px;
+  border-radius: 50%; border: 2.5px solid rgba(255,255,255,.45); border-top-color: #fff;
+  animation: btn-spin .7s linear infinite;
+}
+.btn:not(.primary).busy::after { border-color: color-mix(in srgb, var(--text) 25%, transparent); border-top-color: var(--text); }
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .btn.busy::after { animation-duration: 2s; } }
+.fitem.bad { border-color: color-mix(in srgb, var(--danger) 55%, var(--line)); }

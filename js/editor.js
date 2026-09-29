@@ -1,6 +1,6 @@
 // Page editor shared by "sign" and "form": renders pages, lets the user place,
 // drag and resize image items, then stamps them into the PDF.
-import { h, PL, loadPdfJs, renderPage, pageGeom, drawVisual, savePdf, MAX_PREVIEW_PAGES } from './lib.js';
+import { h, PL, loadPdfJs, renderPage, pageGeom, drawVisual, savePdf, MAX_PREVIEW_PAGES, freeCanvas, onLeave, unsaved } from './lib.js';
 
 export async function stampItems(bytes, items) {
   const doc = await PL().PDFDocument.load(bytes);
@@ -21,31 +21,51 @@ export async function stampItems(bytes, items) {
  * createEditor(container, { onSelect(item|null), onEdit(item) })
  * item: { page, u, v, w, h (fractions of visual page), bytes, type:'png'|'jpg', src (url for display), keepAspect, ... }
  */
-export function createEditor(container, { onSelect, onEdit } = {}) {
+export function createEditor(container, { onSelect, onEdit, onChange } = {}) {
   const docEl = h('div', { class: 'doc' });
   container.append(docEl);
   let pages = []; // {wrap, overlay, vw, vh}
   let items = [];
   let selected = null;
   let current = 0;
+  let io = null, loadGen = 0;
+  const dirty = () => { unsaved.value = items.length > 0; onChange && onChange(); };
+  // Release observers/renders when the user leaves the tool.
+  onLeave(() => ed.destroy());
 
   const ed = {
     items: () => items,
     selected: () => selected,
     current: () => current,
     pageCount: () => pages.length,
-    async load(bytes) {
+    /** Visible width of page i in PDF points. */
+    pagePts: (i = current) => (pages[i] ? pages[i].pts : 595),
+    destroy() {
+      loadGen++;
+      if (io) { io.disconnect(); io = null; }
       docEl.innerHTML = ''; pages = []; items = []; selected = null;
+      unsaved.value = false;
+    },
+    async load(bytes) {
+      ed.destroy();
+      const my = loadGen;
       const pdf = await loadPdfJs(bytes);
       const n = Math.min(pdf.numPages, MAX_PREVIEW_PAGES);
       const maxW = Math.min(820, Math.max(300, container.clientWidth - 40));
       for (let i = 0; i < n; i++) {
+        if (my !== loadGen) { pdf.destroy(); return; }
+        const pg = await pdf.getPage(i + 1);
+        const pts = pg.getViewport({ scale: 1 }).width;
         const c = await renderPage(pdf, i + 1, { maxW, maxH: 5000 });
-        const dpr = devicePixelRatio || 1;
-        c.style.width = c.width / dpr + 'px';
+        const dpr = Math.min(2, devicePixelRatio || 1);
+        const cssW = c.width / dpr;
+        // A JPEG <img> uses far less memory than keeping every page canvas alive.
+        const img = h('img', { src: c.toDataURL('image/jpeg', 0.88), alt: `หน้า ${i + 1}`, draggable: 'false', style: 'display:block;width:100%;height:auto' });
+        const aspect = c.width / c.height;
+        freeCanvas(c);
         const overlay = h('div', { class: 'overlay' });
-        const wrap = h('div', { class: 'page-wrap', style: `width:${c.width / dpr}px` }, h('span', { class: 'plabel' }, `หน้า ${i + 1}`), c, overlay);
-        const p = { wrap, overlay, aspect: c.width / c.height };
+        const wrap = h('div', { class: 'page-wrap', style: `width:${cssW}px` }, h('span', { class: 'plabel' }, `หน้า ${i + 1}`), img, overlay);
+        const p = { wrap, overlay, aspect, pts };
         pages.push(p);
         wrap.addEventListener('pointerdown', (e) => { setCurrent(i); if (e.target === overlay) select(null); });
         docEl.append(wrap);
@@ -53,7 +73,7 @@ export function createEditor(container, { onSelect, onEdit } = {}) {
       if (pdf.numPages > n) docEl.append(h('div', { class: 'sub' }, `แสดง ${n} หน้าแรกจาก ${pdf.numPages} หน้า`));
       pdf.destroy();
       setCurrent(0);
-      const io = new IntersectionObserver((es) => {
+      io = new IntersectionObserver((es) => {
         const vis = es.filter(e => e.isIntersecting).sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
         if (vis) setCurrent(pages.findIndex(p => p.wrap === vis.target));
       }, { threshold: [0.3, 0.6] });
@@ -69,6 +89,7 @@ export function createEditor(container, { onSelect, onEdit } = {}) {
       items.push(it);
       mount(it);
       select(it);
+      dirty();
       pages[page].wrap.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       return it;
     },
@@ -78,10 +99,12 @@ export function createEditor(container, { onSelect, onEdit } = {}) {
       Object.assign(it, { bytes, type, src });
       if (aspect) { it.w = it.h * aspect / P.aspect; it.aspect = aspect; }
       it.el.querySelector('img').src = src;
-      place(it);
+      place(it); dirty();
     },
-    remove(it) { items = items.filter(x => x !== it); it.el.remove(); if (selected === it) select(null); },
-    clear() { items.forEach(i => i.el.remove()); items = []; select(null); },
+    remove(it) { items = items.filter(x => x !== it); it.el.remove(); if (selected === it) select(null); dirty(); },
+    clear() { items.forEach(i => i.el.remove()); items = []; select(null); dirty(); },
+    /** Call after the user downloaded the result. */
+    saved() { unsaved.value = false; },
     select,
   };
 
@@ -100,8 +123,28 @@ export function createEditor(container, { onSelect, onEdit } = {}) {
   }
   function mount(it) {
     const rs = h('div', { class: 'rs' });
-    const del = h('button', { class: 'del', title: 'ลบ' }, '×');
-    it.el = h('div', { class: 'item' }, h('img', { src: it.src, draggable: 'false' }), rs, del);
+    const del = h('button', { class: 'del', title: 'ลบรายการนี้', type: 'button' }, '×');
+    it.el = h('div', { class: 'item', tabindex: 0, role: 'group',
+      'aria-label': 'รายการที่วางบนหน้า — ลูกศรเพื่อเลื่อน, Shift+ลูกศรเพื่อปรับขนาด, Delete เพื่อลบ' },
+      h('img', { src: it.src, draggable: 'false', alt: '' }), rs, del);
+    it.el.onfocus = () => { if (selected !== it) select(it); };
+    it.el.onkeydown = (e) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); ed.remove(it); return; }
+      if (e.key === 'Enter') { onEdit && onEdit(it); return; }
+      const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+      if (!d) return;
+      e.preventDefault();
+      const step = 0.005;
+      if (e.shiftKey) {
+        const w = Math.max(0.02, Math.min(1 - it.u, it.w + d[0] * step * 2 - d[1] * step * 2));
+        const k = w / it.w;
+        it.w = w; it.h = Math.min(1 - it.v, it.h * k);
+      } else {
+        it.u = Math.min(1 - it.w, Math.max(0, it.u + d[0] * step));
+        it.v = Math.min(1 - it.h, Math.max(0, it.v + d[1] * step));
+      }
+      place(it); dirty();
+    };
     del.onpointerdown = (e) => e.stopPropagation();
     del.onclick = (e) => { e.stopPropagation(); ed.remove(it); };
     it.el.ondblclick = () => onEdit && onEdit(it);
@@ -110,6 +153,7 @@ export function createEditor(container, { onSelect, onEdit } = {}) {
     const drag = (e, mode) => {
       e.preventDefault(); e.stopPropagation();
       select(it);
+      it.el.focus({ preventScroll: true });
       const R = pages[it.page].overlay.getBoundingClientRect();
       const sx = e.clientX, sy = e.clientY, s = { u: it.u, v: it.v, w: it.w, h: it.h };
       const mv = (ev) => {
@@ -123,17 +167,13 @@ export function createEditor(container, { onSelect, onEdit } = {}) {
           if (s.v + hh > 1) { hh = 1 - s.v; if (it.keepAspect) w = hh * (s.w / s.h); }
           it.w = w; it.h = hh;
         }
-        place(it);
+        place(it); dirty();
       };
-      const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); };
-      addEventListener('pointermove', mv); addEventListener('pointerup', up);
+      const up = () => { removeEventListener('pointermove', mv); removeEventListener('pointerup', up); removeEventListener('pointercancel', up); };
+      addEventListener('pointermove', mv); addEventListener('pointerup', up); addEventListener('pointercancel', up);
     };
     it.el.onpointerdown = (e) => drag(e, 'move');
     rs.onpointerdown = (e) => drag(e, 'resize');
   }
-  document.addEventListener('keydown', (e) => {
-    if (!selected || !docEl.isConnected) return;
-    if ((e.key === 'Delete' || e.key === 'Backspace') && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) { ed.remove(selected); e.preventDefault(); }
-  });
   return ed;
 }

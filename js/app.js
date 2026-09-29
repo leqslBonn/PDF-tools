@@ -1,5 +1,5 @@
 import { TOOLS } from './registry.js';
-import { h } from './lib.js';
+import { h, runLeave, unsaved } from './lib.js';
 
 const app = document.getElementById('app');
 
@@ -53,8 +53,8 @@ function privacyBox() {
     ),
     h('details', {},
       h('summary', {}, 'สิ่งที่เชื่อมต่ออินเทอร์เน็ต และวิธีตรวจสอบด้วยตัวเอง'),
-      h('p', {}, 'การเชื่อมต่อมีแค่ตอนเปิดหน้าเว็บ คือโหลดตัวโปรแกรมของเว็บ และโหลดฟอนต์ภาษาไทยจาก Google Fonts ซึ่งไม่มีเนื้อหาเอกสารของคุณติดไปด้วย'),
-      h('p', {}, 'ตรวจสอบเองได้ 2 วิธี: (1) กด F12 เปิดแท็บ Network แล้วลองใช้เครื่องมือ จะไม่พบการส่งไฟล์ออกไป (2) เปิดหน้าเว็บไว้แล้วปิด Wi-Fi หรือเน็ต เครื่องมือยังใช้งานได้ตามปกติ')),
+      h('p', {}, 'เว็บนี้เชื่อมต่ออินเทอร์เน็ตเฉพาะตอนเปิดหน้าเว็บ เพื่อดาวน์โหลดตัวโปรแกรมและฟอนต์จากเว็บนี้เอง (ไม่เรียกใช้บริการภายนอก เช่น Google) และไม่มีการส่งเนื้อหาเอกสารของคุณออกไป'),
+      h('p', {}, 'ตรวจสอบเองได้ 2 วิธี: (1) กด F12 เปิดแท็บ Network แล้วลองใช้เครื่องมือ จะไม่พบการส่งไฟล์ออกไป (2) เปิดหน้าเว็บจนโหลดเสร็จ แล้วปิด Wi-Fi หรือเน็ต เครื่องมือทุกตัวยังใช้งานได้')),
   );
 }
 
@@ -113,7 +113,15 @@ async function renderTool(tool) {
   }
 }
 
+let currentHash = location.hash;
 function route() {
+  if (location.hash === currentHash && app.childElementCount) return;
+  if (unsaved.value && !confirm('มีงานที่ยังไม่ได้บันทึก ต้องการออกจากหน้านี้หรือไม่?')) {
+    history.replaceState(null, '', currentHash || '#/');
+    return;
+  }
+  currentHash = location.hash;
+  runLeave();
   const slug = location.hash.replace(/^#\/?/, '').split('?')[0];
   const tool = TOOLS.find(t => t.slug === slug);
   window.scrollTo(0, 0);
@@ -121,4 +129,15 @@ function route() {
 }
 
 window.addEventListener('hashchange', route);
+window.addEventListener('beforeunload', (e) => { if (unsaved.value) { e.preventDefault(); e.returnValue = ''; } });
+// A file dropped outside a drop zone would make the browser open it and lose the user's work.
+window.addEventListener('dragover', (e) => e.preventDefault());
+window.addEventListener('drop', (e) => e.preventDefault());
 route();
+
+// Warm the font cache (self-hosted) so signature/stamp fonts also work offline later.
+(window.requestIdleCallback || setTimeout)(() => {
+  for (const f of ['Sarabun', 'Charm', 'Mali', 'Itim', 'Srisakdi']) {
+    for (const w of ['400', '700']) document.fonts.load(`${w} 16px "${f}"`, 'กขabc๑').catch(() => {});
+  }
+});
