@@ -65,7 +65,7 @@ function signatureModal(onDone) {
   pad.onpointermove = (e) => { if (cur) { cur.pts.push(pt(e)); redraw(); } };
   pad.onpointerup = pad.onpointercancel = () => { cur = null; };
   const colors = h('div', { class: 'row' }, ...['#000000', '#1a237e', '#0d47a1', '#b71c1c'].map(c =>
-    h('button', { type: 'button', class: 'btn sm', style: `width:30px;height:30px;padding:0;background:${c};border:2px solid #fff`, onclick: () => { color = c; } })),
+    h('button', { type: 'button', class: 'btn sm swatch' + (c === color ? ' on' : ''), title: c, style: `background:${c}`, onclick: (e) => { color = c; e.currentTarget.parentNode.querySelectorAll('.swatch').forEach(x => x.classList.toggle('on', x === e.currentTarget)); } })),
   field('ความหนา', (() => { const r = h('input', { type: 'range', min: 1, max: 8, value: width }); r.oninput = () => width = +r.value; return r; })()),
   h('button', { class: 'btn sm', onclick: () => { strokes.pop(); redraw(); } }, '↶ ย้อน'),
   h('button', { class: 'btn sm', onclick: () => { strokes = []; redraw(); } }, 'ล้าง'));

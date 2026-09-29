@@ -7,9 +7,12 @@
   <meta name="description" content="รวมเครื่องมือ PDF ครบในที่เดียว สแกน รวม แยก แปลง ปรับแต่ง ป้องกัน และเซ็นเอกสาร ทำงานในเบราว์เซอร์ ไฟล์ไม่ถูกส่งขึ้นเซิร์ฟเวอร์">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;700&family=Charm:wght@400;700&family=Mali:wght@500&family=Itim&family=Srisakdi:wght@700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=Sarabun:wght@400;700&family=Charm:wght@400;700&family=Mali:wght@500&family=Itim&family=Srisakdi:wght@700&display=swap" rel="stylesheet">
+  <meta name="theme-color" content="#f6f4fe" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0e0b1a" media="(prefers-color-scheme: dark)">
+  <script>try { var t = localStorage.getItem('pdftk-theme'); if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
   <link rel="stylesheet" href="css/style.css">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23ff5a5f'/%3E%3Ctext x='16' y='21' font-size='11' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'%3EPDF%3C/text%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%23a21caf'/%3E%3Ctext x='16' y='21' font-size='11' font-family='Arial' font-weight='bold' fill='white' text-anchor='middle'%3EPDF%3C/text%3E%3C/svg%3E">
 </head>
 <body>
   <header class="topbar">
@@ -21,12 +24,13 @@
       </div>
     </a>
     <div class="top-actions">
-      <a class="btn sm" href="#/" title="หน้าแรก">⌂ หน้าแรก</a>
+      <button class="btn theme-btn" id="themeBtn" type="button" title="สลับโหมดสว่าง/มืด" aria-label="สลับโหมดสว่าง/มืด"><span class="ic-light">🌙</span><span class="ic-dark">☀️</span></button>
+      <a class="btn home-btn" href="#/" title="หน้าแรก" aria-label="หน้าแรก">🏠<span class="lbl">หน้าแรก</span></a>
     </div>
   </header>
 
   <main class="wrap" id="app"></main>
-  <footer>ประมวลผลทั้งหมดในเบราว์เซอร์ของคุณ · ไฟล์ไม่ถูกอัปโหลดไปที่ใด</footer>
+  <footer>ประมวลผลทั้งหมดในเบราว์เซอร์ของคุณ · ไฟล์ไม่ถูกอัปโหลดไปที่ใด<br>ทำด้วย <span class="heart">♥</span> ให้ทุกคนที่ต้องจัดการเอกสาร</footer>
 
   <script src="vendor/pdf-lib.min.js"></script>
   <script src="vendor/pdf.min.js"></script>

@@ -46,7 +46,15 @@ export function field(label, control) {
 }
 
 /* ---------------- file drop ---------------- */
-const ICON_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5M12 3v12"/></svg>';
+const ICON_UP = `<svg class="drop-art" viewBox="0 0 120 100" aria-hidden="true">
+  <rect x="30" y="14" width="52" height="66" rx="9" fill="currentColor" opacity=".14" transform="rotate(-8 56 47)"/>
+  <rect x="38" y="10" width="52" height="66" rx="9" fill="var(--card)" stroke="currentColor" stroke-width="2.5"/>
+  <path d="M48 26h24M48 34h32M48 42h18" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" opacity=".35"/>
+  <g class="arrow"><circle cx="64" cy="70" r="17" fill="currentColor"/><path d="M64 78V62M57 68l7-7 7 7" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <path class="spark" d="M17 30l2.5 6 6 2.5-6 2.5-2.5 6-2.5-6-6-2.5 6-2.5z" fill="#f59e0b"/>
+  <path class="spark b" d="M101 20l2 4.5 4.5 2-4.5 2-2 4.5-2-4.5-4.5-2 4.5-2z" fill="#ec4899"/>
+  <circle class="spark b" cx="100" cy="72" r="3.5" fill="#38bdf8"/>
+</svg>`;
 
 /**
  * Drop zone. opts: { accept: '.pdf' | 'image', multiple, title, hint, onFiles(files) }
@@ -59,6 +67,8 @@ export function dropzone(opts) {
     h('div', { html: ICON_UP }),
     h('div', { class: 'big' }, opts.title || (isImg ? 'ลากไฟล์รูปภาพมาวาง หรือคลิกเพื่อเลือก' : 'ลากไฟล์ PDF มาวาง หรือคลิกเพื่อเลือก')),
     h('div', { class: 'small' }, opts.hint || (opts.multiple ? 'เลือกได้หลายไฟล์พร้อมกัน' : `ไฟล์ละไม่เกิน ${MAX_MB} MB`)),
+    h('span', { class: 'drop-cta', 'aria-hidden': 'true' }, isImg ? '🖼 เลือกรูปภาพ' : '📄 เลือกไฟล์ PDF'),
+    h('span', { class: 'drop-alt' }, 'หรือลากไฟล์มาปล่อยตรงนี้ได้เลย'),
     input,
   );
   const take = (list) => {
@@ -136,11 +146,16 @@ export async function downloadZip(files, name) {
 
 /** Green result box with download button. */
 export function resultBox(text, onDownload, extra = []) {
-  return h('div', { class: 'result' },
-    h('div', { class: 'big' }, '✅ ' + text),
+  const bits = ['#a78bfa', '#f472b6', '#facc15', '#34d399', '#38bdf8', '#fb923c', '#c084fc', '#4ade80'];
+  const confetti = h('span', { class: 'confetti', 'aria-hidden': 'true' },
+    ...bits.map((k, i) => h('i', { style: `--k:${k};--x:${40 + i * 22}px;--y:${(i % 2 ? -1 : 1) * (18 + (i * 7) % 26)}px;--r:${200 + i * 45}deg;--d:${i * 40}ms` })));
+  return h('div', { class: 'result', role: 'status' },
+    confetti,
+    h('div', { class: 'ok-ic', html: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>' }),
+    h('div', { class: 'big' }, h('small', {}, 'เสร็จแล้ว! ไฟล์พร้อมดาวน์โหลด'), text),
     h('div', { class: 'spacer' }),
     ...extra,
-    h('button', { class: 'btn primary', onclick: onDownload }, '⬇ ดาวน์โหลด'),
+    h('button', { class: 'btn primary', onclick: onDownload }, '⬇ ดาวน์โหลดไฟล์'),
   );
 }
 
@@ -185,7 +200,7 @@ export function pageTile(n, extra = []) {
 export async function fillThumbs(pdf, tiles, opts = {}) {
   for (const t of tiles) {
     const n = +t.dataset.n;
-    if (n > MAX_PREVIEW_PAGES) { t.cv.innerHTML = '<div style="color:#98a3c7;font-size:12px">ไม่แสดงตัวอย่าง</div>'; continue; }
+    if (n > MAX_PREVIEW_PAGES) { t.cv.innerHTML = '<div style="color:var(--muted);font-size:12px">ไม่แสดงตัวอย่าง</div>'; continue; }
     if (!t.isConnected && opts.stopWhenDetached) return;
     try { const c = await renderPage(pdf, n, { maxW: 130, maxH: 150 }); t.cv.innerHTML = ''; t.cv.append(c); t.canvas = c; }
     catch { t.cv.textContent = '⚠'; }

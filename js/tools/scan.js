@@ -98,10 +98,10 @@ export default function (root) {
   const oneShot = h('input', { type: 'file', accept: 'image/*', capture: 'environment', class: 'hidden' });
   oneShot.onchange = () => { addFiles([...oneShot.files]); oneShot.value = ''; };
 
-  const bigBtn = (icon, title, onclick) => h('button', { class: 'btn', style: 'flex-direction:column;padding:16px 10px;flex:1;min-width:140px', onclick },
+  const bigBtn = (icon, title, onclick) => h('button', { class: 'btn scan-opt', style: 'flex-direction:column;padding:16px 10px;flex:1;min-width:140px', onclick },
     h('span', { style: 'font-size:28px' }, icon), h('span', {}, title));
-  const drop = h('div', { class: 'drop', style: 'cursor:default' },
-    h('div', { class: 'big' }, 'ลากไฟล์รูปภาพมาวาง หรือเลือกวิธีด้านล่าง'),
+  const drop = h('div', { class: 'drop scan-drop', style: 'cursor:default' },
+    h('div', { class: 'big' }, 'ถ่ายเอกสาร หรือลากรูปมาวางได้เลย 📄✨'),
     h('div', { class: 'row', style: 'justify-content:center;margin-top:14px' },
       bigBtn('📷', 'ถ่ายทีละภาพ', () => oneShot.click()),
       bigBtn('📸', 'ถ่ายหลายภาพรวด', () => cameraModal((c) => addCanvas(c))),
