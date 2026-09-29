@@ -1,0 +1,57 @@
+import { TOOLS } from './registry.js';
+import { h } from './lib.js';
+
+const app = document.getElementById('app');
+
+function renderHome() {
+  document.title = 'PDF Toolkit';
+  app.innerHTML = '';
+  app.append(
+    h('section', { class: 'hero' },
+      h('h1', {}, 'ครบทุกงาน PDF จบในเบราว์เซอร์เดียว'),
+      h('p', {}, 'สแกนเอกสารจากมือถือ รวม-แยกไฟล์ จัดหน้า บีบอัด แปลงรูป ใส่เลขหน้า ลายน้ำ รหัสผ่าน และเซ็นชื่อ — ทุกอย่างประมวลผลบนเครื่องของคุณเอง ไม่ต้องติดตั้งโปรแกรม ไม่ต้องสมัครสมาชิก'),
+      h('div', { class: 'pills' },
+        h('span', { class: 'pill' }, h('span', { class: 'dot' }), `เครื่องมือ ${TOOLS.length} รายการ`),
+        h('span', { class: 'pill' }, '🔒 ไฟล์ไม่ออกจากเครื่องคุณ'),
+        h('span', { class: 'pill' }, '📱 ใช้ได้ทั้งมือถือและคอมพิวเตอร์'),
+      ),
+    ),
+    h('div', { class: 'grid' },
+      ...TOOLS.map(t => h('a', { class: 'tool-card', href: `#/${t.slug}`, style: `--c:${t.color}` },
+        h('div', { class: 'tool-icon', html: t.icon }),
+        h('div', {}, h('h3', {}, t.title), h('p', {}, t.desc)),
+      )),
+    ),
+  );
+}
+
+async function renderTool(tool) {
+  document.title = `${tool.title} — PDF Toolkit`;
+  app.innerHTML = '';
+  const body = h('div');
+  app.append(
+    h('a', { class: 'back', href: '#/' }, '← กลับไปเลือกเครื่องมือ'),
+    h('div', { class: 'tool-head' },
+      h('div', { class: 'tool-icon', style: `--c:${tool.color};background:${tool.color}`, html: tool.icon }),
+      h('div', {}, h('h1', {}, tool.title), h('p', {}, tool.desc)),
+    ),
+    body,
+  );
+  try {
+    const mod = await import(`./tools/${tool.slug}.js`);
+    mod.default(body);
+  } catch (e) {
+    console.error(e);
+    body.append(h('div', { class: 'status err' }, 'โหลดเครื่องมือไม่สำเร็จ: ' + e.message));
+  }
+}
+
+function route() {
+  const slug = location.hash.replace(/^#\/?/, '').split('?')[0];
+  const tool = TOOLS.find(t => t.slug === slug);
+  window.scrollTo(0, 0);
+  if (tool) renderTool(tool); else renderHome();
+}
+
+window.addEventListener('hashchange', route);
+route();
