@@ -109,7 +109,19 @@ export async function fillPdf(bytes, values, { mode = 'flat' } = {}) {
     return doc.save({ useObjectStreams: true, updateFieldAppearances: false });
   }
 
-  // flat: bake existing appearances, then draw values ourselves
+  // flat: bake existing appearances, then draw values ourselves.
+  // Many real forms have widgets without an appearance stream, which makes flatten() throw —
+  // give those an empty one first.
+  for (const f of form.getFields()) {
+    for (const w of f.acroField.getWidgets()) {
+      const ap = w.dict.lookup(L.PDFName.of('AP'));
+      const n = ap && ap.get && ap.get(L.PDFName.of('N'));
+      if (n) continue;
+      const r = w.getRectangle();
+      const blank = doc.context.formXObject([], { BBox: [0, 0, r.width, r.height] });
+      w.setNormalAppearance(doc.context.register(blank));
+    }
+  }
   form.flatten({ updateFieldAppearances: false });
   const pages = doc.getPages();
   const cache = new Map();
