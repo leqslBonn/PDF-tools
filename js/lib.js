@@ -374,7 +374,9 @@ function ensureFont(spec) {
 }
 
 export async function textToPng(text, { size = 24, color = '#000000', font = 'Sarabun', bold = false, italic = false, scale = 4, pad = 0.15 } = {}) {
-  const spec = `${italic ? 'italic ' : ''}${bold ? '700 ' : '400 '}${size * scale}px "${font}", "Sarabun", sans-serif`;
+  // `font` may be a single family name or a full CSS stack (e.g. '"Tahoma", sans-serif')
+  const fam = /[",]/.test(font) ? font : `"${font}"`;
+  const spec = `${italic ? 'italic ' : ''}${bold ? '700 ' : '400 '}${size * scale}px ${fam}, "Sarabun", sans-serif`;
   await ensureFont(spec);
   const lines = String(text).split('\n');
   const c = document.createElement('canvas');
@@ -394,7 +396,8 @@ export async function textToPng(text, { size = 24, color = '#000000', font = 'Sa
   ctx = c.getContext('2d');
   ctx.font = spec; ctx.fillStyle = color; ctx.textBaseline = 'alphabetic';
   lines.forEach((l, i) => ctx.fillText(l, p + left, p + lh * i + asc));
-  return { bytes: await canvasToBytes(c), w: c.width / scale, h: c.height / scale, canvas: c };
+  // baseline / x0: where the first line's baseline and text start sit inside the image (in pt) — for exact placement
+  return { bytes: await canvasToBytes(c), w: c.width / scale, h: c.height / scale, canvas: c, baseline: (p + asc) / scale, x0: (p + left) / scale };
 }
 
 /* ---------------- geometry: "visual" page space ↔ PDF user space ----------------

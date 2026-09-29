@@ -822,3 +822,11 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 .fill-box.filled { background: color-mix(in srgb, #22c55e 16%, transparent); border-color: #22c55e; }
 .fill-box.on { outline: 3px solid var(--accent); outline-offset: 1px; }
+
+/* edit text */
+.tline { position: absolute; padding: 0; margin: 0; border: 0; background: transparent; cursor: text; border-radius: 2px; }
+.tline:hover, .tline:focus-visible { background: color-mix(in srgb, var(--accent) 14%, transparent); outline: 1.5px solid color-mix(in srgb, var(--accent) 60%, transparent); }
+.tline.sel { outline: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); z-index: 3; }
+.tline.edited:not(.sel) { outline: 1.5px dashed #22c55e; }
+.tedit-cover, .tedit-text { position: absolute; pointer-events: none; }
+.tedit-text { z-index: 1; }
