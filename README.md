@@ -24,7 +24,7 @@
 | กรอกแบบฟอร์ม PDF | `fill.js` | กรอกช่องที่มีในไฟล์ (ข้อความ/ติ๊ก/ตัวเลือก) แบบล็อก (ไทยถูกทุกแอป) หรือแบบยังแก้ได้ |
 | แก้ข้อความใน PDF | `edit-text.js` | แตะบรรทัดเพื่อแก้/ลบ จับแบบอักษร ขนาด สีตัวอักษร สีพื้นอัตโนมัติ, ปิดทับ หรือลบของเดิมจริง (แปลงหน้าเป็นภาพ) |
 
-## รัน
+## รัน (ตอนพัฒนา)
 
 ต้องเปิดผ่าน web server (เปิดไฟล์ตรงแบบ `file://` ไม่ได้ เพราะใช้ ES modules)
 
@@ -32,19 +32,29 @@
 python -m http.server 8765
 ```
 
-แล้วเปิด http://localhost:8765
+แล้วเปิด http://localhost:8765 — ทดสอบทุกเครื่องมือได้จาก console: `const T = await import('/tests/harness.js'); await T.runAll()`
 
-## Deploy
+## Build + Deploy
 
-ก่อน deploy ทุกครั้ง: `python scripts/gen_sw.py` (อัปเดตรายการไฟล์ที่เก็บไว้ใช้ออฟไลน์ + เลขเวอร์ชัน ให้แอปที่ติดตั้งไว้ได้อัปเดต)
+```bash
+npm install
+npm run build
+netlify deploy --prod --dir dist --no-build
+```
+
+`npm run build` (esbuild) ทำให้: bundle + minify JS แยกไฟล์ตามเครื่องมือ, minify CSS, คัดลอก vendor/icons, และสร้างรายการ precache ของ service worker ใน `dist/sw.js` (เลขเวอร์ชันจาก hash ของไฟล์ ทำให้แอปที่ติดตั้งไว้ได้อัปเดต)
 ไอคอนแอป: `python scripts/make_icons.py`
 
+## Performance
 
-เป็น static site ล้วน — ลากทั้งโฟลเดอร์ไปวางใน Netlify / GitHub Pages / Cloudflare Pages ได้เลย
+- หน้าแรกไม่โหลดไลบรารีหนัก (pdf.js / pdf-lib ฯลฯ ~2 MB) — โหลดเฉพาะตอนเปิดเครื่องมือ (`loadLibs` ใน `js/lib.js`)
+- งานภาพหนัก (ครอบมุม/ลบเงาของสแกน) และการเข้ารหัส JPEG รันใน Web Worker (`js/worker.js`) หน้าจอไม่ค้าง — เบราว์เซอร์ที่ไม่รองรับจะทำบนเธรดหลักแทนอัตโนมัติ
+- JPEG เข้ารหัสด้วย MozJPEG (WASM) ไฟล์เล็กกว่าตัวเข้ารหัสของเบราว์เซอร์ ~6–20%
+- pdf.js 6 (legacy build — รองรับ iPad/Safari รุ่นเก่า)
 
 ## ไลบรารี (อยู่ใน `vendor/`, ใช้แบบ offline ได้)
 
-pdf-lib (@cantoo fork, รองรับเข้ารหัส) · pdf.js 3.11 · JSZip · SortableJS · pako
+pdf-lib (@cantoo fork, รองรับเข้ารหัส) · pdf.js 6.3 (legacy build) · MozJPEG (@jsquash/jpeg) · JSZip · SortableJS · pako
 ฟอนต์ไทย (Kanit, IBM Plex Sans Thai, Sarabun, Charm, Mali, Itim, Srisakdi) เก็บไว้ใน `vendor/fonts/` + `css/fonts.css` — ไม่เรียก Google หรือบริการภายนอกเลย และเปิดหน้าเว็บครั้งเดียวแล้วใช้ออฟไลน์ได้ทุกเครื่องมือ (modulepreload)
 
 ไฟล์ PDF ที่ติดรหัส: ถ้าเป็นรหัสเจ้าของ (เปิดอ่านได้แต่ห้ามแก้) จะปลดให้อัตโนมัติ ถ้าต้องใส่รหัสเพื่อเปิด จะถามรหัสก่อน

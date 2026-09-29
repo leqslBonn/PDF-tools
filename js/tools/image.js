@@ -1,4 +1,5 @@
 import { h, dropzone, readPdf, statusBar, download, downloadZip, loadPdfJs, renderPage, fmtSize, baseName, seg, field, canvasToBytes, MAX_PREVIEW_PAGES, busy, freeCanvas } from '../lib.js';
+import { encodeJpeg } from '../work.js';
 
 /** Render pages → [{name, data(Uint8Array), canvas}] */
 export async function pdfToImages(bytes, { format = 'jpeg', dpi = 150, quality = 0.9, pages, onProgress } = {}) {
@@ -13,7 +14,7 @@ export async function pdfToImages(bytes, { format = 'jpeg', dpi = 150, quality =
     const k = Math.min(260 / c.width, 300 / c.height, 1);
     thumb.width = Math.max(1, Math.round(c.width * k)); thumb.height = Math.max(1, Math.round(c.height * k));
     thumb.getContext('2d').drawImage(c, 0, 0, thumb.width, thumb.height);
-    const data = await canvasToBytes(c, type, quality);
+    const data = type === 'image/jpeg' ? await encodeJpeg(c, quality, { progressive: true }) : await canvasToBytes(c, type, quality);
     const size = [c.width, c.height];
     freeCanvas(c);
     out.push({ n, thumb, size, data, type, ext: format === 'png' ? 'png' : 'jpg' });

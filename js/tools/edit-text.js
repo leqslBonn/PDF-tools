@@ -1,5 +1,6 @@
 import { h, dropzone, readPdf, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, field, textToPng, pageGeom, drawVisual,
   loadPdfJs, canvasToBytes, freeCanvas, busy, onLeave, unsaved, copyInto, MAX_PREVIEW_PAGES, tick } from '../lib.js';
+import { encodeJpeg } from '../work.js';
 
 /* ---------- fonts ---------- */
 
@@ -160,7 +161,7 @@ export async function applyEdits(bytes, edits, { secure = false, dpi = 200, onPr
     await pg.render({ canvasContext: ctx, viewport: vp }).promise;
     const k = c.width / vp1.width;
     for (const e of list) { ctx.fillStyle = e.bg; ctx.fillRect(e.cover.u * k, e.cover.v * k, e.cover.w * k, e.cover.h * k); }
-    const img = await out.embedJpg(await canvasToBytes(c, 'image/jpeg', 0.92));
+    const img = await out.embedJpg(await encodeJpeg(c, 0.92));
     freeCanvas(c); pg.cleanup();
     const page = out.addPage([vp1.width, vp1.height]);
     page.drawImage(img, { x: 0, y: 0, width: vp1.width, height: vp1.height });

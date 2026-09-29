@@ -1,5 +1,6 @@
 import { h, dropzone, statusBar, download, resultBox, PL, savePdf, fmtSize, seg, field, imageToCanvas, canvasToBytes, pickFiles, flattenWhite, freeCanvas, busy, tick } from '../lib.js';
 import { rotateCanvas } from '../scan-core.js';
+import { encodeJpeg } from '../work.js';
 
 export const PAGE_SIZES = { a4: [595.28, 841.89], letter: [612, 792], legal: [612, 1008] };
 
@@ -16,7 +17,7 @@ export async function imagesToPdf(images, { size = 'a4', orient = 'auto', margin
     const src = im.canvas || await im.getCanvas();
     const c = flattenWhite(src);
     if (!im.canvas) freeCanvas(src);
-    const jpg = await doc.embedJpg(await canvasToBytes(c, 'image/jpeg', quality));
+    const jpg = await doc.embedJpg(await encodeJpeg(c, quality));
     const cw = c.width, ch = c.height;
     freeCanvas(c);
     // 1 px = 0.75 pt at 96dpi; for "fit" we map image pixels to points so the page matches the photo.

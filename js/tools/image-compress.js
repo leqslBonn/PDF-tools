@@ -1,11 +1,12 @@
 import { h, dropzone, statusBar, download, downloadZip, fmtSize, baseName, seg, field, imageToCanvas, encodeImage, flattenWhite, pickFiles, freeCanvas, busy, onLeave } from '../lib.js';
+import { encodeJpeg } from '../work.js';
 
 /** Returns { data, type, w, h } */
 export async function compressImage(file, { quality = 0.75, maxDim = 0, format = 'auto' } = {}) {
   const c = await imageToCanvas(file, maxDim);
   let type = format === 'auto' ? (file.type === 'image/png' ? 'image/webp' : file.type === 'image/webp' ? 'image/webp' : 'image/jpeg') : format;
   const src = type === 'image/jpeg' ? flattenWhite(c) : c;
-  const r = await encodeImage(src, type, quality);
+  const r = type === 'image/jpeg' ? { data: await encodeJpeg(src, quality, { progressive: true }), type } : await encodeImage(src, type, quality);
   const out = { ...r, w: c.width, h: c.height };
   freeCanvas(src); freeCanvas(c);
   return out;

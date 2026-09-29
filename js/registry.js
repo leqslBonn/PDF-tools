@@ -22,7 +22,7 @@ export const TOOLS = [
   { slug: 'image', title: 'แปลงเป็นรูป PDF→JPG', color: '#ec4899',
     desc: 'เปลี่ยนทุกหน้าเป็น PNG หรือ JPEG ดูตัวอย่างแล้วเลือกดาวน์โหลดได้',
     icon: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>') },
-  { slug: 'image-compress', title: 'ลดขนาดไฟล์ภาพ', color: '#d97706',
+  { slug: 'image-compress', libs: ['zip'], title: 'ลดขนาดไฟล์ภาพ', color: '#d97706',
     desc: 'บีบอัด JPG, PNG, WEBP ให้เล็กลง ปรับคุณภาพและย่อขนาดได้ ทำในเบราว์เซอร์ ไม่ส่งขึ้นเซิร์ฟเวอร์',
     icon: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9l6 6M15 9v6H9"/>') },
   { slug: 'jpg-to-pdf', title: 'JPG → PDF', color: '#2563eb',

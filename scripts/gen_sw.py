@@ -1,12 +1,14 @@
 """Rebuild sw.js's precache list + version from the files on disk.
 
-Run before every deploy:  python scripts/gen_sw.py
+Run automatically by `npm run build` for dist/; for the unbuilt source run:  python scripts/gen_sw.py
 The version is a hash of all file contents, so any change makes installed apps pick up the update.
 """
 import hashlib
+import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
+# optional argument: the folder to scan (dist/ for production builds); default = project root
+ROOT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else Path(__file__).resolve().parent.parent
 INCLUDE = ['index.html', 'manifest.webmanifest', 'css', 'js', 'vendor', 'icons']
 
 files = []

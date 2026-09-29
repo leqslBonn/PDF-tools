@@ -1,5 +1,5 @@
 import { h, statusBar, download, resultBox, fmtSize, seg, field, imageToCanvas, pickFiles, toast, flattenWhite, canvasToBytes, freeCanvas, busy, onLeave, tick, unsaved } from '../lib.js';
-import { warpPerspective, rotateCanvas, applyFilter } from '../scan-core.js';
+import { warpAndFilter, rotateCanvas } from '../scan-core.js';
 import { imagesToPdf } from './jpg-to-pdf.js';
 
 const FILTERS = [['color', 'ลบเงา (สี)'], ['gray', 'ขาวดำ (เทา)'], ['bw', 'ขาว-ดำ คมชัด'], ['original', 'ต้นฉบับ']];
@@ -180,10 +180,10 @@ export default function (root) {
     unsaved.value = true;
     if (redraw) draw();
   }
-  /** Low-res processed preview (from the proxy). */
-  function preview(it) {
+  /** Low-res processed preview (from the proxy); the pixel work runs in the background worker. */
+  async function preview(it) {
     if (!it.thumb) {
-      const o = applyFilter(rotateCanvas(warpPerspective(it.proxy, toPx(it.quad, it.proxy), 900), it.rot), it.filter);
+      const o = rotateCanvas(await warpAndFilter(it.proxy, toPx(it.quad, it.proxy), 900, it.filter), it.rot);
       it.thumb = scaled(o, 300);
       freeCanvas(o);
     }
@@ -192,10 +192,9 @@ export default function (root) {
   /** Full-resolution processed page, built only at export time. */
   async function fullPage(it) {
     const full = await imageToCanvas(it.blob);
-    const warped = warpPerspective(full, toPx(it.quad, full), 2200);
+    const out = await warpAndFilter(full, toPx(it.quad, full), 2200, it.filter);
     freeCanvas(full);
-    const out = applyFilter(rotateCanvas(warped, it.rot), it.filter);
-    return out;
+    return rotateCanvas(out, it.rot);
   }
   async function draw() {
     const my = ++drawGen;
@@ -225,7 +224,8 @@ export default function (root) {
     for (const { cv, it } of tiles) {
       await tick();
       if (my !== drawGen) return;
-      const th = preview(it);
+      const th = await preview(it);
+      if (my !== drawGen) return;
       const c = document.createElement('canvas');
       c.width = th.width; c.height = th.height;
       c.getContext('2d').drawImage(th, 0, 0);

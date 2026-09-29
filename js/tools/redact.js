@@ -1,6 +1,7 @@
 import { h, dropzone, readPdf, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, seg, field, loadPdfJs, canvasToBytes,
   freeCanvas, busy, onLeave, copyInto, MAX_PREVIEW_PAGES, tick } from '../lib.js';
 import { createEditor } from '../editor.js';
+import { encodeJpeg } from '../work.js';
 
 const PIXEL = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=='; // transparent 1×1 (box colour comes from CSS)
 
@@ -95,7 +96,7 @@ export async function redactPdf(bytes, boxes, { color = '#000000', dpi = 200, on
     await page.render({ canvasContext: ctx, viewport: vp }).promise;
     ctx.fillStyle = color;
     for (const b of list) ctx.fillRect(Math.floor(b.u * c.width), Math.floor(b.v * c.height), Math.ceil(b.w * c.width) + 1, Math.ceil(b.h * c.height) + 1);
-    const img = await out.embedJpg(await canvasToBytes(c, 'image/jpeg', 0.9));
+    const img = await out.embedJpg(await encodeJpeg(c, 0.9));
     freeCanvas(c);
     page.cleanup();
     out.addPage([vp1.width, vp1.height]).drawImage(img, { x: 0, y: 0, width: vp1.width, height: vp1.height });

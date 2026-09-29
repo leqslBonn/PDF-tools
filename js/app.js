@@ -1,5 +1,5 @@
 import { TOOLS } from './registry.js';
-import { h, runLeave, unsaved } from './lib.js';
+import { h, runLeave, unsaved, loadLibs } from './lib.js';
 
 const app = document.getElementById('app');
 
@@ -139,7 +139,11 @@ async function renderTool(tool) {
     body,
   );
   try {
-    const mod = await import(`./tools/${tool.slug}.js`);
+    const wait = h('div', { class: 'status' }, 'กำลังเตรียมเครื่องมือ...');
+    body.append(wait);
+    const [mod] = await Promise.all([import(`./tools/${tool.slug}.js`), loadLibs(tool.libs)]);
+    wait.remove();
+    if (!body.isConnected) return; // user already navigated away
     mod.default(body);
   } catch (e) {
     console.error(e);

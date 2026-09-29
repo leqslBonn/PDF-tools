@@ -1,6 +1,7 @@
 import { h, dropzone, readPdf, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, seg, field, textToPng, pageGeom, drawVisual,
   loadPdfJs, renderPage, imageToCanvas, canvasToBytes, pickFiles, freeCanvas, busy, onLeave, unsaved } from '../lib.js';
-import { warpPerspective, rotateCanvas, applyFilter } from '../scan-core.js';
+import { warpAndFilter, rotateCanvas } from '../scan-core.js';
+import { encodeJpeg } from '../work.js';
 import { fullQuad, toPx, scaled, cornerModal } from './scan.js';
 import { loadSaved, saveSaved, signatureModal, thaiDate } from './sign.js';
 
@@ -92,7 +93,7 @@ export async function buildCardCopy(cards, o) {
     const fit = document.createElement('canvas');
     fit.width = 1400; fit.height = Math.round(1400 * CARD.h / CARD.w);
     fit.getContext('2d').drawImage(c, 0, 0, fit.width, fit.height);
-    const img = await doc.embedJpg(await canvasToBytes(fit, 'image/jpeg', 0.9));
+    const img = await doc.embedJpg(await encodeJpeg(fit, 0.9));
     freeCanvas(fit);
     page.drawImage(img, { x, y: A4[1] - v - ch, width: cw, height: ch });
     page.drawRectangle({ x, y: A4[1] - v - ch, width: cw, height: ch, borderColor: PL().rgb(0.75, 0.75, 0.75), borderWidth: 0.5 });
@@ -171,9 +172,8 @@ export default function (root) {
   /** Processed card image from the proxy (preview) or the stored photo (export). */
   async function cardCanvas(s, full) {
     const src = full ? await imageToCanvas(s.blob) : s.proxy;
-    let c = rotateCanvas(warpPerspective(src, toPx(s.quad, src), full ? 1800 : 700), s.rot);
+    const c = rotateCanvas(await warpAndFilter(src, toPx(s.quad, src), full ? 1800 : 700, o.enhance ? 'color' : 'original'), s.rot);
     if (full) freeCanvas(src);
-    if (o.enhance) { const e = applyFilter(c, 'color'); freeCanvas(c); c = e; }
     return c;
   }
   async function drawSlot(key) {

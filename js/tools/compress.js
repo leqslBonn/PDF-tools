@@ -1,4 +1,5 @@
 import { h, dropzone, readPdf, statusBar, download, resultBox, PL, savePdf, fmtSize, baseName, seg, field, loadPdfJs, renderPage, canvasToBytes, tick, busy, freeCanvas } from '../lib.js';
+import { encodeJpeg } from '../work.js';
 
 export const LEVELS = {
   low: { maxPx: 2400, q: 0.82, dpi: 150, label: 'น้อย (คุณภาพสูง)' },
@@ -70,14 +71,16 @@ export async function compressImagesInPdf(bytes, { maxPx, q }, onProgress) {
       const oc = out.getContext('2d');
       oc.imageSmoothingQuality = 'high';
       oc.drawImage(canvas, 0, 0, out.width, out.height);
-      const jpg = await canvasToBytes(out, 'image/jpeg', q);
+      const ow = out.width, oh = out.height;
+      const jpg = await encodeJpeg(out, q);
+      freeCanvas(out); freeCanvas(canvas);
       if (jpg.length >= stream.contents.length * 0.95) continue;
 
       const nd = d.clone(ctx);
       nd.set(PDFName.of('Filter'), PDFName.of('DCTDecode'));
       nd.delete(PDFName.of('DecodeParms'));
-      nd.set(PDFName.of('Width'), PDFNumber.of(out.width));
-      nd.set(PDFName.of('Height'), PDFNumber.of(out.height));
+      nd.set(PDFName.of('Width'), PDFNumber.of(ow));
+      nd.set(PDFName.of('Height'), PDFNumber.of(oh));
       nd.set(PDFName.of('BitsPerComponent'), PDFNumber.of(8));
       nd.set(PDFName.of('ColorSpace'), PDFName.of('DeviceRGB'));
       nd.set(PDFName.of('Length'), PDFNumber.of(jpg.length));
@@ -96,7 +99,7 @@ export async function rasterizePdf(bytes, { dpi, q }, onProgress) {
     const page = await pdf.getPage(i);
     const vp = page.getViewport({ scale: 1 });
     const c = await renderPage(pdf, i, { scale: dpi / 72 });
-    const img = await out.embedJpg(await canvasToBytes(c, 'image/jpeg', q));
+    const img = await out.embedJpg(await encodeJpeg(c, q));
     freeCanvas(c);
     out.addPage([vp.width, vp.height]).drawImage(img, { x: 0, y: 0, width: vp.width, height: vp.height });
     onProgress && onProgress(i / pdf.numPages);

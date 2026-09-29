@@ -240,6 +240,34 @@ export function resultBox(text, onDownload, extra = []) {
   );
 }
 
+/* ---------------- libraries: loaded on demand ----------------
+ * The home page needs none of them; a tool loads what it uses when it opens (~2 MB saved on first paint). */
+const SCRIPTS = { pdflib: 'vendor/pdf-lib.min.js', zip: 'vendor/jszip.min.js', sortable: 'vendor/Sortable.min.js', pako: 'vendor/pako.min.js' };
+export const ALL_LIBS = ['pdflib', 'pdfjs', 'zip', 'sortable', 'pako'];
+const libLoads = new Map();
+function classicScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = res; s.onerror = () => { s.remove(); rej(new Error('โหลดไฟล์ไม่สำเร็จ: ' + src)); };
+    document.head.append(s);
+  });
+}
+async function pdfjsModule() {
+  const m = await import('../vendor/pdfjs/pdf.min.mjs');
+  m.GlobalWorkerOptions.workerSrc = new URL('../vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).href;
+  window.pdfjsLib = m;
+}
+export function loadLibs(names = ALL_LIBS) {
+  return Promise.all(names.map((n) => {
+    if (!libLoads.has(n)) {
+      const p = n === 'pdfjs' ? pdfjsModule() : classicScript(SCRIPTS[n]);
+      libLoads.set(n, p.catch((e) => { libLoads.delete(n); throw e; })); // allow retry after a network error
+    }
+    return libLoads.get(n);
+  }));
+}
+
 /* ---------------- pdf-lib / pdf.js ---------------- */
 export const PL = () => window.PDFLib;
 
@@ -249,7 +277,12 @@ export async function loadPdfLib(bytes) {
 
 /** pdf.js detaches the buffer it's given, so always hand it a copy. */
 export async function loadPdfJs(bytes, password) {
-  return pdfjsLib.getDocument({ data: bytes.slice(), password }).promise;
+  // fontExtraProperties: real embedded font names (used by the text editor)
+  const task = pdfjsLib.getDocument({ data: bytes.slice(), password, fontExtraProperties: true, isEvalSupported: false });
+  const pdf = await task.promise;
+  // pdf.js 6 moved destroy() to the loading task; keep one call site for callers.
+  if (typeof pdf.destroy !== 'function') pdf.destroy = () => task.destroy();
+  return pdf;
 }
 
 /** Render a pdf.js page into a canvas, fitting within maxW x maxH css px (or with fixed scale). */

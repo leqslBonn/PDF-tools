@@ -1,0 +1,12 @@
+{
+  "name": "pdf-toolkit",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "deploy": "node scripts/build.mjs && netlify deploy --prod --dir dist --no-build"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
