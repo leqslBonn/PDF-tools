@@ -7,10 +7,10 @@ const MAX_FULL = 2600;   // stored photo (JPEG) long side
 const PROXY = 1100;      // on-screen editing/thumbnail copy
 
 /** Corners as fractions of the image: [tl,tr,br,bl]. */
-const fullQuad = (inset = 0) => [[inset, inset], [1 - inset, inset], [1 - inset, 1 - inset], [inset, 1 - inset]];
-const toPx = (quad, c) => quad.map(([x, y]) => [x * c.width, y * c.height]);
+export const fullQuad = (inset = 0) => [[inset, inset], [1 - inset, inset], [1 - inset, 1 - inset], [inset, 1 - inset]];
+export const toPx = (quad, c) => quad.map(([x, y]) => [x * c.width, y * c.height]);
 
-function scaled(src, max) {
+export function scaled(src, max) {
   const k = Math.min(1, max / Math.max(src.width, src.height));
   const c = document.createElement('canvas');
   c.width = Math.max(1, Math.round(src.width * k)); c.height = Math.max(1, Math.round(src.height * k));
@@ -22,7 +22,7 @@ function scaled(src, max) {
 }
 
 /** Modal for dragging (or arrow-keying) the 4 document corners. */
-function cornerModal(item, onDone) {
+export function cornerModal(item, onDone) {
   const quad = item.quad.map(p => [...p]);
   const src = item.proxy;
   const disp = scaled(src, 1400);

@@ -2,8 +2,8 @@ import { h, dropzone, readPdf, busy, toast, statusBar, download, resultBox, fmtS
 import { createEditor, stampItems } from '../editor.js';
 
 const STORE = 'pdftk.signatures';
-const loadSaved = () => { try { return JSON.parse(localStorage.getItem(STORE) || '[]'); } catch { return []; } };
-const saveSaved = (a) => {
+export const loadSaved = () => { try { return JSON.parse(localStorage.getItem(STORE) || '[]'); } catch { return []; } };
+export const saveSaved = (a) => {
   // Drop the oldest signatures until it fits (browser storage is ~5 MB).
   for (let list = a.slice(0, 6); ; list = list.slice(0, -1)) {
     try { localStorage.setItem(STORE, JSON.stringify(list)); return true; }
@@ -62,7 +62,7 @@ export function removeWhite(c, threshold = 200) {
   return c;
 }
 
-function signatureModal(onDone) {
+export function signatureModal(onDone) {
   let mode = 'draw', color = '#1a237e', width = 3;
   const bg = h('div', { class: 'modal-bg' });
   const close = () => bg.remove();
@@ -198,7 +198,7 @@ function signatureModal(onDone) {
   }
 }
 
-async function dataUrlBytes(url) { return new Uint8Array(await (await fetch(url)).arrayBuffer()); }
+export async function dataUrlBytes(url) { return new Uint8Array(await (await fetch(url)).arrayBuffer()); }
 
 export default function (root) {
   let file, bytes, gen = 0;
