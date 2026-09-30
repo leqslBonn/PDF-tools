@@ -177,14 +177,18 @@ route();
  * Skipped on localhost so development always sees fresh files (add ?sw to test it locally). */
 const devHost = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && !/[?&]sw\b/.test(location.search);
 if ('serviceWorker' in navigator && location.protocol !== 'file:' && !devHost) {
-  let reloading = false;
-  navigator.serviceWorker.addEventListener('controllerchange', () => { if (!reloading) { reloading = true; location.reload(); } });
+  // Reload only when the user accepted an update — NOT when the first install claims the page
+  // (that would wipe whatever they were doing on their first visit).
+  let updateAccepted = false, reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (updateAccepted && !reloading) { reloading = true; location.reload(); }
+  });
   const offerUpdate = (worker) => {
     if (document.querySelector('.update-toast')) return;
     const bar = h('div', { class: 'toast update-toast', role: 'status' }, '✨ มีเวอร์ชันใหม่ ',
       h('button', { class: 'btn sm primary', style: 'margin-left:8px', onclick: () => {
         if (unsaved.value && !confirm('มีงานที่ยังไม่ได้บันทึก โหลดเวอร์ชันใหม่ตอนนี้เลยหรือไม่?')) return;
-        worker.postMessage('skipWaiting'); bar.remove();
+        updateAccepted = true; worker.postMessage('skipWaiting'); bar.remove();
       } }, 'อัปเดต'),
       h('button', { class: 'btn sm', style: 'margin-left:6px', onclick: () => bar.remove() }, 'ภายหลัง'));
     document.body.append(bar);
